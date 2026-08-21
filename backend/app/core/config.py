@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 
 
@@ -21,6 +23,14 @@ class Settings(BaseSettings):
     # Mecanismo transitório: quando o webhook da Meta existir, o número de
     # WhatsApp verificado passa a ser a fonte de confiança principal.
     mercado_api_keys: dict[str, int] = {}
+
+    # Chave única de administrador, para os endpoints admin-only de
+    # onboarding de mercado (POST/PATCH /mercados, e o bootstrap do
+    # primeiro usuário de um mercado novo). Configurada só no servidor,
+    # via variável de ambiente ADMIN_API_KEY. `None` por padrão — nesse
+    # caso, nenhuma requisição é autenticada como admin (falha fechada:
+    # ver app/core/security.py).
+    admin_api_key: Optional[str] = None
 
     class Config:
         env_file = ".env"
