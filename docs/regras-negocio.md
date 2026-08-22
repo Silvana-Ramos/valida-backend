@@ -69,6 +69,32 @@ Um job agendado, executado diariamente, percorre todos os lotes com
 É essa mudança de faixa que serve de gatilho para o envio de alertas
 proativos (funcionalidade a ser implementada em fase posterior).
 
+**Estado atual de implementação:** o recálculo em si está implementado
+em `app/services/recalculo_risco_service.py` (`recalcular_todos`), com
+o ponto de entrada executável `backend/scripts/recalcular_risco_diario.py`.
+Percorre todos os lotes `confirmado` de todos os mercados numa única
+execução — uma exceção deliberada ao isolamento por mercado (RN05):
+não é uma requisição em nome de nenhum mercado, é uma rotina de
+sistema que processa cada lote isoladamente, um de cada vez. Cada lote
+é travado e commitado individualmente; um erro num lote fica
+registrado no resumo da execução e não impede os demais de serem
+processados. `dias_restantes`/`data_ultima_atualizacao` são sempre
+atualizados; `historico_acoes` só recebe um registro novo quando
+`nivel_risco` muda de faixa (`tipo_acao = status_alterado`,
+`origem = sistema` — primeiro uso real desses dois valores do
+vocabulário, até então só declarados). O job é idempotente por
+natureza: rodar duas vezes no mesmo dia não duplica histórico, porque a
+segunda execução já não encontra nenhuma mudança de faixa.
+
+**Ainda não agendado de fato:** o script existe e está testado, mas
+nenhum agendador externo (cron, Task Scheduler, ou o mecanismo de cron
+de uma hospedagem) o chama ainda — isso depende da decisão de
+hospedagem, ainda não tomada. Também **ainda não implementado**: o
+envio de alertas proativos que a mudança de faixa deveria disparar
+(depende, além do job estar agendado, de Message Templates
+pré-aprovados pela Meta — ver a nota sobre a janela de 24h em
+`CLAUDE.md`).
+
 ## RN04 — Rastreabilidade completa
 
 Toda mudança relevante em um lote gera um registro em `historico_acoes`,
