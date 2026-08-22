@@ -132,6 +132,28 @@ def test_criar_usuario_telefone_duplicado_retorna_409(client, db_mock):
     db_mock.rollback.assert_called_once()
 
 
+def test_criar_usuario_telefone_invalido_retorna_422(client, db_mock):
+    resposta = client.post(
+        "/usuarios",
+        json={"telefone_whatsapp": "988880000", "nome": "Maria", "papel": "dono"},  # sem DDI
+        headers=HEADER_VALIDO,
+    )
+
+    assert resposta.status_code == 422
+    db_mock.add.assert_not_called()
+
+
+def test_criar_usuario_telefone_com_formatacao_e_normalizado(client, db_mock):
+    resposta = client.post(
+        "/usuarios",
+        json={"telefone_whatsapp": "+55 11 98888-0000", "nome": "Maria", "papel": "dono"},
+        headers=HEADER_VALIDO,
+    )
+
+    assert resposta.status_code == 201
+    assert resposta.json()["telefone_whatsapp"] == "5511988880000"
+
+
 # --- listagem ----------------------------------------------------------
 
 
@@ -239,3 +261,16 @@ def test_atualizar_usuario_telefone_duplicado_retorna_409(client, db_mock):
 
     assert resposta.status_code == 409
     db_mock.rollback.assert_called_once()
+
+
+def test_atualizar_usuario_telefone_invalido_retorna_422(client, db_mock):
+    db_mock.get.return_value = _usuario()
+
+    resposta = client.patch(
+        f"/usuarios/{ID_USUARIO}",
+        json={"telefone_whatsapp": "988880009"},  # sem DDI
+        headers=HEADER_VALIDO,
+    )
+
+    assert resposta.status_code == 422
+    db_mock.commit.assert_not_called()

@@ -167,6 +167,36 @@ def test_criar_mercado_telefone_duplicado_retorna_409(client, db_mock):
     db_mock.rollback.assert_called_once()
 
 
+def test_criar_mercado_telefone_invalido_retorna_422(client, db_mock):
+    resposta = client.post(
+        "/mercados",
+        json={
+            "nome": "Mercadinho da Esquina",
+            "telefone_whatsapp": "11999990000",  # sem DDI 55
+            "segmento": "mercearia",
+        },
+        headers=HEADER_ADMIN_VALIDO,
+    )
+
+    assert resposta.status_code == 422
+    db_mock.add.assert_not_called()
+
+
+def test_criar_mercado_telefone_com_formatacao_e_normalizado(client, db_mock):
+    resposta = client.post(
+        "/mercados",
+        json={
+            "nome": "Mercadinho da Esquina",
+            "telefone_whatsapp": "+55 11 99999-0000",
+            "segmento": "mercearia",
+        },
+        headers=HEADER_ADMIN_VALIDO,
+    )
+
+    assert resposta.status_code == 201
+    assert resposta.json()["telefone_whatsapp"] == "5511999990000"
+
+
 # --- listagem ----------------------------------------------------------
 
 
@@ -259,6 +289,19 @@ def test_atualizar_mercado_telefone_duplicado_retorna_409(client, db_mock):
     db_mock.rollback.assert_called_once()
 
 
+def test_atualizar_mercado_telefone_invalido_retorna_422(client, db_mock):
+    db_mock.get.return_value = _mercado()
+
+    resposta = client.patch(
+        f"/mercados/{ID_MERCADO}",
+        json={"telefone_whatsapp": "11999990009"},  # sem DDI 55
+        headers=HEADER_ADMIN_VALIDO,
+    )
+
+    assert resposta.status_code == 422
+    db_mock.commit.assert_not_called()
+
+
 # --- bootstrap de usuário ------------------------------------------------
 
 
@@ -327,3 +370,16 @@ def test_bootstrap_usuario_telefone_duplicado_retorna_409(client, db_mock):
 
     assert resposta.status_code == 409
     db_mock.rollback.assert_called_once()
+
+
+def test_bootstrap_usuario_telefone_invalido_retorna_422(client, db_mock):
+    db_mock.get.return_value = _mercado()
+
+    resposta = client.post(
+        f"/mercados/{ID_MERCADO}/usuarios",
+        json={"telefone_whatsapp": "988880000", "nome": "Maria", "papel": "dono"},  # sem DDI
+        headers=HEADER_ADMIN_VALIDO,
+    )
+
+    assert resposta.status_code == 422
+    db_mock.add.assert_not_called()

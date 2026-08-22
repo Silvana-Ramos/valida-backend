@@ -25,7 +25,7 @@ class TelefoneJaCadastrado(Exception):
 def criar(db: Session, request: MercadoCreateRequest) -> Mercado:
     mercado_orm = MercadoORM(
         nome=request.nome.strip(),
-        telefone_whatsapp=request.telefone_whatsapp.strip(),
+        telefone_whatsapp=request.telefone_whatsapp,
         segmento=request.segmento,
     )
     db.add(mercado_orm)
@@ -60,7 +60,7 @@ def atualizar(db: Session, id_mercado: int, request: MercadoUpdateRequest) -> Me
     if request.nome is not None:
         mercado_orm.nome = request.nome.strip()
     if request.telefone_whatsapp is not None:
-        mercado_orm.telefone_whatsapp = request.telefone_whatsapp.strip()
+        mercado_orm.telefone_whatsapp = request.telefone_whatsapp
     if request.segmento is not None:
         mercado_orm.segmento = request.segmento
     if request.status is not None:

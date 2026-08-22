@@ -3,7 +3,9 @@ from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from app.core.telefone import normalizar_telefone
 
 
 class SegmentoMercado(str, Enum):
@@ -48,6 +50,11 @@ class MercadoCreateRequest(BaseModel):
     telefone_whatsapp: str
     segmento: SegmentoMercado
 
+    @field_validator("telefone_whatsapp")
+    @classmethod
+    def _normalizar_telefone(cls, v: str) -> str:
+        return normalizar_telefone(v)
+
 
 class MercadoUpdateRequest(BaseModel):
     """Atualização de um mercado existente. Todos os campos são opcionais."""
@@ -62,3 +69,10 @@ class MercadoUpdateRequest(BaseModel):
     relatorio_diario_ativo: Optional[bool] = None
     limite_valor_atencao: Optional[Decimal] = None
     limite_quantidade_atencao: Optional[Decimal] = None
+
+    @field_validator("telefone_whatsapp")
+    @classmethod
+    def _normalizar_telefone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return normalizar_telefone(v)

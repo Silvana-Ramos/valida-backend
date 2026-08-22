@@ -29,7 +29,7 @@ class TelefoneJaCadastrado(Exception):
 def criar(db: Session, id_mercado: int, request: UsuarioCreateRequest) -> Usuario:
     usuario_orm = UsuarioORM(
         id_mercado=id_mercado,
-        telefone_whatsapp=request.telefone_whatsapp.strip(),
+        telefone_whatsapp=request.telefone_whatsapp,
         nome=request.nome.strip(),
         papel=request.papel,
     )
@@ -63,7 +63,7 @@ def atualizar(
         raise UsuarioNaoEncontrado(id_usuario)
 
     if request.telefone_whatsapp is not None:
-        usuario_orm.telefone_whatsapp = request.telefone_whatsapp.strip()
+        usuario_orm.telefone_whatsapp = request.telefone_whatsapp
     if request.nome is not None:
         usuario_orm.nome = request.nome.strip()
     if request.papel is not None:
