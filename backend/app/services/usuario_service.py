@@ -50,6 +50,22 @@ def obter(db: Session, id_mercado: int, id_usuario: int) -> Usuario:
     return Usuario.model_validate(usuario_orm, from_attributes=True)
 
 
+def obter_por_telefone(db: Session, telefone: str) -> Usuario | None:
+    """Resolve usuário (e, por consequência, mercado) a partir do
+    telefone já normalizado (`app/core/telefone.py`) — único ponto do
+    sistema que busca `usuarios` sem escopo de `id_mercado`, porque é
+    exatamente essa busca que resolve qual é o mercado (a identidade é
+    determinada aqui, antes de qualquer acesso já escopado por RN05).
+    Usada só pelo processamento do webhook do WhatsApp
+    (`app/services/whatsapp_webhook_service.py`), nunca exposta via
+    HTTP — depende de `usuarios.telefone_whatsapp` ser `UNIQUE`
+    (Migration 0005) para não haver ambiguidade."""
+    usuario_orm = db.query(UsuarioORM).filter(UsuarioORM.telefone_whatsapp == telefone).first()
+    if usuario_orm is None:
+        return None
+    return Usuario.model_validate(usuario_orm, from_attributes=True)
+
+
 def listar(db: Session, id_mercado: int) -> list[Usuario]:
     query = db.query(UsuarioORM).filter(UsuarioORM.id_mercado == id_mercado)
     return [Usuario.model_validate(usuario_orm, from_attributes=True) for usuario_orm in query.all()]
