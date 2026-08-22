@@ -25,9 +25,12 @@ class Lote(BaseModel):
 
 
 class LoteCreateRequest(BaseModel):
-    """Entrada do cadastro de lote por texto (RN02: entra como pendente_confirmacao)."""
+    """Entrada do cadastro de lote por texto (RN02: entra como pendente_confirmacao).
 
-    id_mercado: int
+    `id_mercado` não vem daqui — vem do contexto de autenticação de quem
+    chama (`Depends(obter_id_mercado_atual)`), nunca do corpo da
+    requisição (RN05)."""
+
     produto_nome: str
     quantidade: float
     data_validade: date

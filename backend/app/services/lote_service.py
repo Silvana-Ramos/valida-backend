@@ -89,10 +89,10 @@ def _para_schema(lote_orm: LoteORM) -> Lote:
     return Lote(**dados)
 
 
-def criar_pendente(db: Session, request: LoteCreateRequest) -> Lote:
+def criar_pendente(db: Session, id_mercado: int, request: LoteCreateRequest) -> Lote:
     produto, preco_venda_ignorado = produto_service.obter_ou_criar(
         db,
-        request.id_mercado,
+        id_mercado,
         request.produto_nome,
         preco_venda=request.preco_venda,
     )
@@ -100,7 +100,7 @@ def criar_pendente(db: Session, request: LoteCreateRequest) -> Lote:
     agora = datetime.now()
 
     lote_orm = LoteORM(
-        id_mercado=request.id_mercado,
+        id_mercado=id_mercado,
         id_produto=produto.id,
         quantidade=request.quantidade,
         numero_lote=request.numero_lote,
@@ -139,27 +139,27 @@ def criar_pendente(db: Session, request: LoteCreateRequest) -> Lote:
     return _para_schema(lote_orm)
 
 
-def obter(db: Session, id_lote: int) -> Lote:
+def obter(db: Session, id_mercado: int, id_lote: int) -> Lote:
     lote_orm = db.get(LoteORM, id_lote)
-    if lote_orm is None:
+    if lote_orm is None or lote_orm.id_mercado != id_mercado:
+        # RN05: lote de outro mercado é tratado como inexistente, não como
+        # "proibido" — evita vazar a existência de lotes de outros mercados.
         raise LoteNaoEncontrado(id_lote)
     return _para_schema(lote_orm)
 
 
-def listar(
-    db: Session, id_mercado: int | None = None, status: StatusLote | None = None
-) -> list[Lote]:
-    query = db.query(LoteORM)
-    if id_mercado is not None:
-        query = query.filter(LoteORM.id_mercado == id_mercado)
+def listar(db: Session, id_mercado: int, status: StatusLote | None = None) -> list[Lote]:
+    query = db.query(LoteORM).filter(LoteORM.id_mercado == id_mercado)
     if status is not None:
         query = query.filter(LoteORM.status == status)
     return [_para_schema(lote_orm) for lote_orm in query.all()]
 
 
-def editar_pendente(db: Session, id_lote: int, request: LoteEditRequest) -> Lote:
+def editar_pendente(
+    db: Session, id_mercado: int, id_lote: int, request: LoteEditRequest
+) -> Lote:
     lote_orm = db.get(LoteORM, id_lote)
-    if lote_orm is None:
+    if lote_orm is None or lote_orm.id_mercado != id_mercado:
         raise LoteNaoEncontrado(id_lote)
     if lote_orm.status != StatusLote.PENDENTE_CONFIRMACAO:
         raise AcaoInvalidaParaStatus(lote_orm.status)
@@ -194,9 +194,9 @@ def editar_pendente(db: Session, id_lote: int, request: LoteEditRequest) -> Lote
     return _para_schema(lote_orm)
 
 
-def confirmar(db: Session, id_lote: int) -> Lote:
+def confirmar(db: Session, id_mercado: int, id_lote: int) -> Lote:
     lote_orm = db.get(LoteORM, id_lote)
-    if lote_orm is None:
+    if lote_orm is None or lote_orm.id_mercado != id_mercado:
         raise LoteNaoEncontrado(id_lote)
     if lote_orm.status != StatusLote.PENDENTE_CONFIRMACAO:
         raise AcaoInvalidaParaStatus(lote_orm.status)
@@ -220,14 +220,13 @@ def confirmar(db: Session, id_lote: int) -> Lote:
     return _para_schema(lote_orm)
 
 
-def cancelar(db: Session, id_lote: int) -> None:
+def cancelar(db: Session, id_mercado: int, id_lote: int) -> None:
     lote_orm = db.get(LoteORM, id_lote)
-    if lote_orm is None:
+    if lote_orm is None or lote_orm.id_mercado != id_mercado:
         raise LoteNaoEncontrado(id_lote)
     if lote_orm.status != StatusLote.PENDENTE_CONFIRMACAO:
         raise AcaoInvalidaParaStatus(lote_orm.status)
 
-    id_mercado = lote_orm.id_mercado
     db.delete(lote_orm)
 
     historico_orm = HistoricoAcaoORM(
@@ -245,10 +244,17 @@ def cancelar(db: Session, id_lote: int) -> None:
     db.commit()
 
 
-def historico_do_lote(db: Session, id_lote: int) -> list[HistoricoAcao]:
+def historico_do_lote(db: Session, id_mercado: int, id_lote: int) -> list[HistoricoAcao]:
+    lote_orm = db.get(LoteORM, id_lote)
+    if lote_orm is None or lote_orm.id_mercado != id_mercado:
+        raise LoteNaoEncontrado(id_lote)
+
     query = (
         db.query(HistoricoAcaoORM)
-        .filter(HistoricoAcaoORM.id_lote == id_lote)
+        .filter(
+            HistoricoAcaoORM.id_lote == id_lote,
+            HistoricoAcaoORM.id_mercado == id_mercado,
+        )
         .order_by(HistoricoAcaoORM.id)
     )
     return [HistoricoAcao.model_validate(h, from_attributes=True) for h in query.all()]

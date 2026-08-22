@@ -29,31 +29,44 @@ router = APIRouter(prefix="/lotes", tags=["lotes"])
 
 
 @router.post("", response_model=Lote, status_code=201)
-def criar_lote(request: LoteCreateRequest, db: Session = Depends(get_db)) -> Lote:
-    return lote_service.criar_pendente(db, request)
+def criar_lote(
+    request: LoteCreateRequest,
+    id_mercado: int = Depends(obter_id_mercado_atual),
+    db: Session = Depends(get_db),
+) -> Lote:
+    return lote_service.criar_pendente(db, id_mercado, request)
 
 
 @router.get("", response_model=list[Lote])
 def listar_lotes(
-    id_mercado: int | None = None,
     status: StatusLote | None = None,
+    id_mercado: int = Depends(obter_id_mercado_atual),
     db: Session = Depends(get_db),
 ) -> list[Lote]:
-    return lote_service.listar(db, id_mercado=id_mercado, status=status)
+    return lote_service.listar(db, id_mercado, status=status)
 
 
 @router.get("/{id_lote}", response_model=Lote)
-def obter_lote(id_lote: int, db: Session = Depends(get_db)) -> Lote:
+def obter_lote(
+    id_lote: int,
+    id_mercado: int = Depends(obter_id_mercado_atual),
+    db: Session = Depends(get_db),
+) -> Lote:
     try:
-        return lote_service.obter(db, id_lote)
+        return lote_service.obter(db, id_mercado, id_lote)
     except LoteNaoEncontrado:
         raise HTTPException(status_code=404, detail="Lote não encontrado.")
 
 
 @router.patch("/{id_lote}", response_model=Lote)
-def editar_lote(id_lote: int, request: LoteEditRequest, db: Session = Depends(get_db)) -> Lote:
+def editar_lote(
+    id_lote: int,
+    request: LoteEditRequest,
+    id_mercado: int = Depends(obter_id_mercado_atual),
+    db: Session = Depends(get_db),
+) -> Lote:
     try:
-        return lote_service.editar_pendente(db, id_lote, request)
+        return lote_service.editar_pendente(db, id_mercado, id_lote, request)
     except LoteNaoEncontrado:
         raise HTTPException(status_code=404, detail="Lote não encontrado.")
     except AcaoInvalidaParaStatus:
@@ -64,9 +77,13 @@ def editar_lote(id_lote: int, request: LoteEditRequest, db: Session = Depends(ge
 
 
 @router.post("/{id_lote}/confirmar", response_model=Lote)
-def confirmar_lote(id_lote: int, db: Session = Depends(get_db)) -> Lote:
+def confirmar_lote(
+    id_lote: int,
+    id_mercado: int = Depends(obter_id_mercado_atual),
+    db: Session = Depends(get_db),
+) -> Lote:
     try:
-        return lote_service.confirmar(db, id_lote)
+        return lote_service.confirmar(db, id_mercado, id_lote)
     except LoteNaoEncontrado:
         raise HTTPException(status_code=404, detail="Lote não encontrado.")
     except AcaoInvalidaParaStatus:
@@ -77,9 +94,13 @@ def confirmar_lote(id_lote: int, db: Session = Depends(get_db)) -> Lote:
 
 
 @router.post("/{id_lote}/cancelar", status_code=204)
-def cancelar_lote(id_lote: int, db: Session = Depends(get_db)) -> None:
+def cancelar_lote(
+    id_lote: int,
+    id_mercado: int = Depends(obter_id_mercado_atual),
+    db: Session = Depends(get_db),
+) -> None:
     try:
-        lote_service.cancelar(db, id_lote)
+        lote_service.cancelar(db, id_mercado, id_lote)
     except LoteNaoEncontrado:
         raise HTTPException(status_code=404, detail="Lote não encontrado.")
     except AcaoInvalidaParaStatus:
@@ -186,5 +207,12 @@ def registrar_ajuste_lote(
 
 
 @router.get("/{id_lote}/historico", response_model=list[HistoricoAcao])
-def historico_do_lote(id_lote: int, db: Session = Depends(get_db)) -> list[HistoricoAcao]:
-    return lote_service.historico_do_lote(db, id_lote)
+def historico_do_lote(
+    id_lote: int,
+    id_mercado: int = Depends(obter_id_mercado_atual),
+    db: Session = Depends(get_db),
+) -> list[HistoricoAcao]:
+    try:
+        return lote_service.historico_do_lote(db, id_mercado, id_lote)
+    except LoteNaoEncontrado:
+        raise HTTPException(status_code=404, detail="Lote não encontrado.")

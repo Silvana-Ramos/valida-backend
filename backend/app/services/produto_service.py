@@ -62,8 +62,6 @@ def obter_ou_criar(
     return Produto.model_validate(produto_orm, from_attributes=True), False
 
 
-def listar(db: Session, id_mercado: int | None = None) -> list[Produto]:
-    query = db.query(ProdutoORM)
-    if id_mercado is not None:
-        query = query.filter(ProdutoORM.id_mercado == id_mercado)
+def listar(db: Session, id_mercado: int) -> list[Produto]:
+    query = db.query(ProdutoORM).filter(ProdutoORM.id_mercado == id_mercado)
     return [Produto.model_validate(p, from_attributes=True) for p in query.all()]
