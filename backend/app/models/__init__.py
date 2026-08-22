@@ -7,6 +7,7 @@ from app.models.lote import LoteORM
 from app.models.mercado import MercadoORM
 from app.models.movimentacao_estoque import MovimentacaoEstoqueORM
 from app.models.produto import ProdutoORM
+from app.models.sessao_conversa import SessaoConversaORM
 from app.models.usuario import UsuarioORM
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "MovimentacaoEstoqueORM",
     "ImportacaoORM",
     "ItemImportacaoORM",
+    "SessaoConversaORM",
 ]
