@@ -36,6 +36,14 @@ tipos de movimentação — `entrada`, `venda`, `retirada` e `ajuste`**
 fechamento detalhado de cada etapa (item 5 da "Ordem de implementação"
 abaixo).
 
+A tabela `sessoes_whatsapp` (ver seção própria abaixo) corresponde à
+**Migration 0006, preparada mas ainda não aplicada** ao banco principal —
+faz parte do planejamento da integração com o WhatsApp para o piloto
+(fluxo guiado por menu, sem NLU/LLM nesta fase, decisão aprovada
+explicitamente pelo usuário). Hoje o sistema não tem nenhum webhook nem
+cliente de envio de mensagens implementado; esta tabela só passa a ter
+um consumidor real numa fase posterior, fora do escopo desta migration.
+
 A **pipeline de importação também está implementada, como MVP** —
 `app/services/importacao_service.py`, `POST /importacoes`,
 `GET /importacoes/{id}` e `GET /importacoes/{id}/itens` — cobrindo só
@@ -86,6 +94,34 @@ funcionário).
 | telefone_whatsapp | texto | |
 | nome | texto | |
 | papel | enum | dono, funcionario |
+
+## `sessoes_whatsapp`
+
+**Migration 0006, preparada mas ainda não aplicada ao banco principal**
+(ver nota no topo deste documento). Estado de uma conversa guiada por
+menu em andamento pelo WhatsApp (piloto, sem NLU/LLM). Existe uma linha
+só enquanto o usuário está no meio de um fluxo com várias perguntas
+(ex.: cadastro de produto: nome → quantidade → validade → confirmação);
+ausência de linha significa "sem conversa ativa" — nesse caso o bot
+responde com o menu principal, sem precisar de um valor de `estado`
+específico para isso.
+
+| Campo | Tipo | Observação |
+|---|---|---|
+| id_usuario | PK, FK → usuarios | uma sessão ativa por usuário; `ON DELETE CASCADE` |
+| id_mercado | FK → mercados, not null | denormalizado — mesmo padrão de isolamento (RN05) já usado em `lotes`/`movimentacoes_estoque`/`historico_acoes` |
+| estado | texto, not null | passo atual do fluxo guiado (ex.: `aguardando_produto`, `aguardando_quantidade`, `aguardando_validade`, `aguardando_confirmacao_cadastro`, `aguardando_escolha_confirmar_pendente`, `aguardando_escolha_cancelar_pendente`) — convenção de negócio, sem `CHECK`/`ENUM` associado (mesma decisão já tomada para `lotes.status_operacional`, RN06), para não exigir uma migration a cada ajuste no desenho do fluxo de mensagens enquanto ele ainda está sendo construído |
+| dados_parciais | jsonb, not null, default `{}` | campos já coletados no meio do fluxo (ex.: `{"produto_nome": "Pão Francês", "quantidade": 10}`) |
+| criado_em | timestamp, not null, default `now()` | |
+| atualizado_em | timestamp, not null, default `now()` | atualizado a cada passo do fluxo; também serve de base para uma limpeza futura de sessões abandonadas |
+
+Constraints: PK `id_usuario`; FK `id_usuario → usuarios(id)` `ON DELETE
+CASCADE`; FK `id_mercado → mercados(id)`. Índice não único em
+`id_mercado`.
+
+**Deduplicação de mensagem (idempotência do webhook):** decisão
+explicitamente adiada para uma fatia futura, separada desta tabela — não
+faz parte da Migration 0006.
 
 ## `produtos`
 
