@@ -6,9 +6,11 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Configurações básicas da aplicação.
 
-    Nenhuma credencial de integração externa (WhatsApp, Meta, provedor de
-    IA) é definida aqui ainda — isso entra em fases posteriores, mediante
-    confirmação explícita.
+    Nenhuma credencial de provedor de IA é definida aqui ainda — isso
+    entra em fase posterior, mediante confirmação explícita. As
+    credenciais da Cloud API da Meta (WhatsApp) abaixo são só a
+    configuração (fatia 3 do plano de integração); o webhook em si
+    ainda não foi implementado (fatias futuras, separadas).
     """
 
     app_name: str = "Valida"
@@ -31,6 +33,21 @@ class Settings(BaseSettings):
     # caso, nenhuma requisição é autenticada como admin (falha fechada:
     # ver app/core/security.py).
     admin_api_key: Optional[str] = None
+
+    # Credenciais da Cloud API da Meta (WhatsApp), para o futuro webhook
+    # (fatias 4-7 do plano de integração — nenhuma delas implementada
+    # ainda). Configuradas só no servidor, via variáveis de ambiente de
+    # mesmo nome em maiúsculas. `None` por padrão em todas — sem elas,
+    # o webhook (quando existir) não tem como validar assinatura nem
+    # enviar mensagem nenhuma.
+    #   WHATSAPP_VERIFY_TOKEN  -- handshake GET de verificação do webhook
+    #   WHATSAPP_APP_SECRET    -- valida a assinatura X-Hub-Signature-256
+    #   WHATSAPP_ACCESS_TOKEN  -- token permanente do System User, para enviar respostas
+    #   WHATSAPP_PHONE_NUMBER_ID -- ID do número remetente na Graph API
+    whatsapp_verify_token: Optional[str] = None
+    whatsapp_app_secret: Optional[str] = None
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_phone_number_id: Optional[str] = None
 
     class Config:
         env_file = ".env"
