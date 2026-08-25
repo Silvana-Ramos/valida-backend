@@ -67,7 +67,10 @@ def _para_schema(lote_orm: LoteORM) -> Lote:
         "id": lote_orm.id,
         "id_mercado": lote_orm.id_mercado,
         "id_produto": lote_orm.id_produto,
-        "quantidade": lote_orm.quantidade,
+        # Exposto pela API como estoque disponível atual (RN07), não o
+        # valor de cadastro (`quantidade`) — sincronizados até a primeira
+        # movimentação real de estoque, mas divergem a partir dela.
+        "quantidade": lote_orm.quantidade_disponivel,
         "numero_lote": lote_orm.numero_lote,
         "data_validade": lote_orm.data_validade,
         "data_entrada": lote_orm.data_entrada,

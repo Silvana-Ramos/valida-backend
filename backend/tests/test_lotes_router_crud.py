@@ -365,3 +365,45 @@ def test_historico_do_lote_de_outro_mercado_retorna_404(client, db_mock):
     resposta = client.get(f"/lotes/{ID_LOTE}/historico", headers=HEADER_VALIDO)
 
     assert resposta.status_code == 404
+
+
+# --- regressão: GET reflete quantidade_disponivel após movimentação -------
+#
+# Bug de produção: POST /lotes/{id}/venda atualizava lotes.quantidade_disponivel
+# corretamente (movimentação registrada com quantidade_resultante correto),
+# mas GET /lotes e GET /lotes/{id} continuavam devolvendo o campo legado
+# `quantidade` (valor de cadastro, nunca tocado por movimentações), em vez do
+# estoque disponível atual.
+
+
+def test_venda_de_1_em_lote_com_10_faz_get_unico_retornar_9(client, db_mock):
+    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
+
+    resposta_venda = client.post(
+        f"/lotes/{ID_LOTE}/venda", json={"quantidade": 1}, headers=HEADER_VALIDO
+    )
+    assert resposta_venda.status_code == 201
+    assert Decimal(str(resposta_venda.json()["quantidade_resultante"])) == Decimal("9")
+
+    resposta_get = client.get(f"/lotes/{ID_LOTE}", headers=HEADER_VALIDO)
+
+    assert resposta_get.status_code == 200
+    assert Decimal(str(resposta_get.json()["quantidade"])) == Decimal("9")
+
+
+def test_venda_de_1_em_lote_com_10_faz_get_lista_retornar_9(client, db_mock):
+    lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
+    db_mock.get.return_value = lote_orm
+    db_mock.lote_q.filter.return_value.all.return_value = [lote_orm]
+
+    resposta_venda = client.post(
+        f"/lotes/{ID_LOTE}/venda", json={"quantidade": 1}, headers=HEADER_VALIDO
+    )
+    assert resposta_venda.status_code == 201
+
+    resposta_lista = client.get("/lotes", headers=HEADER_VALIDO)
+
+    assert resposta_lista.status_code == 200
+    corpo = resposta_lista.json()
+    assert len(corpo) == 1
+    assert Decimal(str(corpo[0]["quantidade"])) == Decimal("9")

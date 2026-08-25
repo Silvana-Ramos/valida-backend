@@ -108,6 +108,19 @@ def test_obter_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
         lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
 
 
+def test_obter_retorna_quantidade_disponivel_apos_venda(db_mock):
+    # Regressão: uma venda (RN07) só altera quantidade_disponivel — o
+    # campo legado `quantidade` permanece no valor de cadastro. O GET
+    # precisa refletir o estoque disponível atual, não o de cadastro.
+    lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
+    lote_orm.quantidade_disponivel = Decimal("9")  # simula venda de 1 unidade
+    db_mock.get.return_value = lote_orm
+
+    lote = lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
+
+    assert lote.quantidade == 9
+
+
 # --- listar ------------------------------------------------------------
 
 
@@ -136,6 +149,16 @@ def test_listar_vazio(db_mock):
     _definir_lotes(db_mock, [])
 
     assert lote_service.listar(db_mock, ID_MERCADO) == []
+
+
+def test_listar_retorna_quantidade_disponivel_apos_venda(db_mock):
+    lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
+    lote_orm.quantidade_disponivel = Decimal("9")  # simula venda de 1 unidade
+    _definir_lotes(db_mock, [lote_orm])
+
+    lotes = lote_service.listar(db_mock, ID_MERCADO)
+
+    assert lotes[0].quantidade == 9
 
 
 # --- editar_pendente ---------------------------------------------------
