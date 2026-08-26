@@ -17,6 +17,12 @@ class Lote(BaseModel):
     data_entrada: datetime
     origem_cadastro: OrigemCadastro
     status: StatusLote
+    # Complementar a `status` (RN06): reflete a disponibilidade do lote
+    # para fins operacionais (disponivel/esgotado/descartado), derivada
+    # das movimentações de estoque (RN07) — `status` sozinho não muda com
+    # venda/retirada. Sem CHECK/ENUM no banco (RN06); `None` só ocorre
+    # para lotes anteriores à Migration 0002 sem backfill retroativo.
+    status_operacional: Optional[str] = None
     nivel_risco: NivelRisco
     dias_restantes: int
     data_ultima_atualizacao: datetime

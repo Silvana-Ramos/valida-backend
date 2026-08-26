@@ -179,9 +179,13 @@ Migration 0002, já executada no banco principal. O cadastro
 `quantidade_disponivel` sincronizados sempre que `quantidade` é
 corrigida. A confirmação (`confirmar`) não precisa alterar esses três
 campos, porque `pendente_confirmacao` e `confirmado` mapeiam para o
-mesmo valor (`disponivel`/`= quantidade`). Venda, descarte e FEFO
-**ainda não estão implementados** — não existe, hoje, nenhum caminho de
-código que leve `status_operacional` a `esgotado` ou `descartado`.
+mesmo valor (`disponivel`/`= quantidade`). Venda e retirada (RN07) **já
+estão implementadas** e levam `status_operacional` a `esgotado` (venda
+que zera o saldo) ou `descartado` (retirada que zera o saldo); FEFO
+segue não implementado. `status_operacional` (junto com `quantidade`,
+que passou a refletir `quantidade_disponivel`) é exposto por GET
+/lotes e GET /lotes/{id_lote} — ver schema `Lote` em
+`backend/app/schemas/lote.py`.
 
 **Ausência de constraint:** `status_operacional` é atualmente um campo
 `VARCHAR` livre no banco, sem `CHECK` ou tipo ENUM associado. O

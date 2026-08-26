@@ -407,3 +407,31 @@ def test_venda_de_1_em_lote_com_10_faz_get_lista_retornar_9(client, db_mock):
     corpo = resposta_lista.json()
     assert len(corpo) == 1
     assert Decimal(str(corpo[0]["quantidade"])) == Decimal("9")
+
+
+# --- regressão: GET expõe status_operacional após saldo zerar -------------
+#
+# Bug de produção: venda que zera o saldo (5 -> 0) já gravava
+# status_operacional = "esgotado" corretamente no banco (RN06/RN07), mas o
+# schema Lote não tinha esse campo — GET /lotes/{id} continuava sem
+# nenhuma forma de sinalizar que o lote estava esgotado (só mostrava
+# status = "confirmado", que RN07 mantém de propósito, e nivel_risco, que
+# é sobre validade e não sobre estoque).
+
+
+def test_venda_que_zera_saldo_faz_get_retornar_status_operacional_esgotado(client, db_mock):
+    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("5"))
+
+    resposta_venda = client.post(
+        f"/lotes/{ID_LOTE}/venda", json={"quantidade": 5}, headers=HEADER_VALIDO
+    )
+    assert resposta_venda.status_code == 201
+    assert Decimal(str(resposta_venda.json()["quantidade_resultante"])) == Decimal("0")
+
+    resposta_get = client.get(f"/lotes/{ID_LOTE}", headers=HEADER_VALIDO)
+
+    assert resposta_get.status_code == 200
+    corpo = resposta_get.json()
+    assert corpo["status"] == "confirmado"  # RN07: nao muda com venda
+    assert corpo["status_operacional"] == "esgotado"
+    assert Decimal(str(corpo["quantidade"])) == Decimal("0")

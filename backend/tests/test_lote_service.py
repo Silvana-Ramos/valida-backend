@@ -121,6 +121,22 @@ def test_obter_retorna_quantidade_disponivel_apos_venda(db_mock):
     assert lote.quantidade == 9
 
 
+def test_obter_retorna_status_operacional_esgotado_apos_venda_zerar_saldo(db_mock):
+    # Regressão: status (RN02) permanece "confirmado" quando a venda zera
+    # o saldo (RN07) — quem reflete isso é status_operacional (RN06), que
+    # precisa ser exposto pelo GET, não só persistido no banco.
+    lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("5"))
+    lote_orm.quantidade_disponivel = Decimal("0")
+    lote_orm.status_operacional = "esgotado"
+    db_mock.get.return_value = lote_orm
+
+    lote = lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
+
+    assert lote.status == StatusLote.CONFIRMADO
+    assert lote.status_operacional == "esgotado"
+    assert lote.quantidade == 0
+
+
 # --- listar ------------------------------------------------------------
 
 

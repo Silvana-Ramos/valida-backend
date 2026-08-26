@@ -76,6 +76,7 @@ def _para_schema(lote_orm: LoteORM) -> Lote:
         "data_entrada": lote_orm.data_entrada,
         "origem_cadastro": lote_orm.origem_cadastro,
         "status": lote_orm.status,
+        "status_operacional": lote_orm.status_operacional,
         "nivel_risco": lote_orm.nivel_risco,
         "dias_restantes": lote_orm.dias_restantes,
         "data_ultima_atualizacao": lote_orm.data_ultima_atualizacao,
