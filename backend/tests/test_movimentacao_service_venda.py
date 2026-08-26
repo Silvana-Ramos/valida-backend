@@ -2,6 +2,7 @@
 (RN07 — venda de estoque). A Session do SQLAlchemy é sempre mockada aqui:
 nenhum teste conecta a nenhum banco, real ou em memória."""
 
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -11,16 +12,23 @@ from app.models.lote import LoteORM
 from app.schemas.enums import StatusLote
 from app.schemas.movimentacao_estoque import VendaEstoqueRequest
 from app.services.lote_service import AcaoInvalidaParaStatus, LoteNaoEncontrado
-from app.services.movimentacao_service import SaldoInsuficienteParaVenda, registrar_venda
+from app.services.movimentacao_service import (
+    LoteVencidoNaoAceitaVenda,
+    SaldoInsuficienteParaVenda,
+    registrar_venda,
+)
 
 ID_MERCADO = 5
 ID_LOTE = 1
+VENCIDO = date.today() - timedelta(days=1)
+NAO_VENCIDO = date.today() + timedelta(days=5)
 
 
 def _lote(
     status: StatusLote,
     status_operacional: str,
     quantidade_disponivel: Decimal,
+    data_validade: date = NAO_VENCIDO,
     id_mercado: int = ID_MERCADO,
 ) -> LoteORM:
     return LoteORM(
@@ -30,11 +38,12 @@ def _lote(
         status_operacional=status_operacional,
         quantidade_disponivel=quantidade_disponivel,
         quantidade_inicial=quantidade_disponivel,
+        data_validade=data_validade,
     )
 
 
-def _lote_confirmado(status_operacional: str, quantidade_disponivel: Decimal) -> LoteORM:
-    return _lote(StatusLote.CONFIRMADO, status_operacional, quantidade_disponivel)
+def _lote_confirmado(status_operacional: str, quantidade_disponivel: Decimal, **kwargs) -> LoteORM:
+    return _lote(StatusLote.CONFIRMADO, status_operacional, quantidade_disponivel, **kwargs)
 
 
 def _mock_db(lote_orm: LoteORM | None) -> MagicMock:
@@ -91,6 +100,34 @@ def test_saldo_insuficiente_e_rejeitado_sem_gravar_nada():
     db.add.assert_not_called()
     db.commit.assert_not_called()
     db.rollback.assert_called_once()
+
+
+def test_lote_vencido_e_rejeitado_sem_gravar_nada():
+    lote_orm = _lote_confirmado("disponivel", Decimal("9"), data_validade=VENCIDO)
+    db = _mock_db(lote_orm)
+    request = VendaEstoqueRequest(quantidade=Decimal("1"))
+
+    with pytest.raises(LoteVencidoNaoAceitaVenda):
+        registrar_venda(db, ID_MERCADO, ID_LOTE, request)
+
+    assert lote_orm.quantidade_disponivel == Decimal("9")  # inalterado
+    assert lote_orm.status_operacional == "disponivel"  # inalterado
+    db.add.assert_not_called()
+    db.commit.assert_not_called()
+    db.rollback.assert_called_once()
+
+
+def test_lote_vencido_no_dia_ainda_e_aceito():
+    # RN01: dias_restantes == 0 (vence hoje) ainda não é "vencido"
+    # (dias_restantes < 0) — só o dia seguinte passa a rejeitar a venda.
+    lote_orm = _lote_confirmado("disponivel", Decimal("9"), data_validade=date.today())
+    db = _mock_db(lote_orm)
+    request = VendaEstoqueRequest(quantidade=Decimal("1"))
+
+    registrar_venda(db, ID_MERCADO, ID_LOTE, request)
+
+    assert lote_orm.quantidade_disponivel == Decimal("8")
+    db.commit.assert_called_once()
 
 
 def test_lote_ja_esgotado_e_rejeitado_por_saldo_insuficiente():

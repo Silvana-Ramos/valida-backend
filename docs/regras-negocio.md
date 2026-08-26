@@ -215,6 +215,15 @@ compatibilidade entre as duas regras.
 - Uma retirada que zera o saldo → `status_operacional = descartado`.
 - `produtos.status` não muda automaticamente em nenhum desses casos.
 
+**Venda x vencimento (RN01):** `venda` nunca é aceita sobre um lote vencido
+(`dias_restantes < 0`), mesmo com saldo disponível — é rejeitada sem
+gravar nada (nem movimentação, nem alteração de `quantidade_disponivel`).
+`dias_restantes` é recalculado na hora a partir de `data_validade`, nunca
+a partir do valor persistido (só oficial até o próximo job diário, RN03).
+Produto vencido só pode sair do estoque por `retirada` (que, no sentido
+oposto, exige que o lote já esteja vencido para ser aceita) — nunca por
+`venda`.
+
 **`quantidade_inicial`:** permanece imutável após a confirmação — nenhuma
 venda, retirada ou ajuste a altera.
 

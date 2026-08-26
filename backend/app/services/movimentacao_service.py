@@ -42,6 +42,10 @@ class SaldoInsuficienteParaVenda(Exception):
     pass
 
 
+class LoteVencidoNaoAceitaVenda(Exception):
+    pass
+
+
 class LoteNaoVencidoNaoAceitaRetirada(Exception):
     pass
 
@@ -151,6 +155,15 @@ def registrar_venda(
     (ambos sempre têm `quantidade_disponivel = 0`, RN07). Só
     `quantidade_disponivel` muda — `quantidade_inicial` nunca é tocada.
 
+    Lote vencido (`dias_restantes < 0`, RN01) nunca aceita venda — é
+    rejeitado sem gravar nada, mesmo com saldo disponível. `dias_restantes`
+    é recalculado na hora via `lote_service.calcular_risco(lote_orm.data_validade)`,
+    nunca confiando em `nivel_risco`/`dias_restantes` persistidos (só
+    oficiais até o próximo job diário, RN03) — mesmo critério já usado por
+    `registrar_retirada`, que exige o oposto (só aceita lote vencido).
+    Produto vencido só pode sair do estoque por retirada por vencimento,
+    nunca por venda.
+
     `id_mercado` deve vir de uma fonte confiável (sessão/autenticação do
     chamador, não do corpo da requisição) — RN05 exige isolamento entre
     mercados; um lote de outro mercado é tratado como inexistente.
@@ -179,6 +192,10 @@ def registrar_venda(
             raise LoteNaoEncontrado(id_lote)
         if lote_orm.status != StatusLote.CONFIRMADO:
             raise AcaoInvalidaParaStatus(lote_orm.status)
+
+        dias_restantes, _ = calcular_risco(lote_orm.data_validade)
+        if dias_restantes < 0:
+            raise LoteVencidoNaoAceitaVenda(id_lote)
 
         quantidade_anterior = lote_orm.quantidade_disponivel
         quantidade_movimentada = request.quantidade

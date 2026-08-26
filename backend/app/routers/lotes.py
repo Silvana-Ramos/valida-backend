@@ -18,6 +18,7 @@ from app.services.lote_service import AcaoInvalidaParaStatus, LoteNaoEncontrado
 from app.services.movimentacao_service import (
     LoteDescartadoNaoAceitaEntrada,
     LoteNaoVencidoNaoAceitaRetirada,
+    LoteVencidoNaoAceitaVenda,
     MovimentacaoEstornadaNaoEncontrada,
     MovimentacaoJaEstornada,
     SaldoInsuficienteParaAjuste,
@@ -145,6 +146,11 @@ def registrar_venda_lote(
         raise HTTPException(
             status_code=409,
             detail="Só é possível registrar venda em um lote com status confirmado.",
+        )
+    except LoteVencidoNaoAceitaVenda:
+        raise HTTPException(
+            status_code=409,
+            detail="Lote vencido não pode ser vendido; registre uma retirada por vencimento.",
         )
     except SaldoInsuficienteParaVenda:
         raise HTTPException(status_code=409, detail="Saldo insuficiente para essa venda.")

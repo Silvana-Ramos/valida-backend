@@ -6,6 +6,7 @@ autenticação (`obter_id_mercado_atual`) roda de verdade, contra um
 mapeamento de chaves de teste, não o real (configurado só via variável de
 ambiente MERCADO_API_KEYS)."""
 
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -22,12 +23,15 @@ ID_MERCADO = 5
 ID_LOTE = 1
 CHAVE_VALIDA = "chave-teste-mercado-5"
 HEADER_VALIDO = {"X-Mercado-Api-Key": CHAVE_VALIDA}
+VENCIDO = date.today() - timedelta(days=1)
+NAO_VENCIDO = date.today() + timedelta(days=5)
 
 
 def _lote(
     status: StatusLote,
     status_operacional: str,
     quantidade_disponivel: Decimal,
+    data_validade: date = NAO_VENCIDO,
     id_mercado: int = ID_MERCADO,
 ) -> LoteORM:
     return LoteORM(
@@ -37,6 +41,7 @@ def _lote(
         status_operacional=status_operacional,
         quantidade_disponivel=quantidade_disponivel,
         quantidade_inicial=quantidade_disponivel,
+        data_validade=data_validade,
     )
 
 
@@ -150,6 +155,22 @@ def test_lote_nao_confirmado_retorna_409(client, db_mock):
     )
 
     assert resposta.status_code == 409
+
+
+def test_lote_vencido_retorna_409_e_nao_altera_estoque(client, db_mock):
+    # Regressão de produção: lote vencido (nivel_risco = "vencido") não
+    # pode ser vendido, mesmo com saldo disponível.
+    lote_orm = _lote_confirmado("disponivel", Decimal("9"), data_validade=VENCIDO)
+    db_mock.get.return_value = lote_orm
+
+    resposta = client.post(
+        f"/lotes/{ID_LOTE}/venda", json={"quantidade": 1}, headers=HEADER_VALIDO
+    )
+
+    assert resposta.status_code == 409
+    assert lote_orm.quantidade_disponivel == Decimal("9")  # inalterado
+    db_mock.add.assert_not_called()  # nenhuma movimentação criada
+    db_mock.commit.assert_not_called()
 
 
 def test_saldo_insuficiente_retorna_409(client, db_mock):
