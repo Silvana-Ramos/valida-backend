@@ -28,6 +28,7 @@ from app.schemas.sessao_conversa import SessaoConversa
 from app.schemas.usuario import Usuario
 from app.services import lote_service, produto_service, sessao_conversa_service, usuario_service
 from app.services.lote_service import AcaoInvalidaParaStatus, LoteNaoEncontrado
+from app.services.movimentacao_service import STATUS_OPERACIONAL_DESCARTADO, STATUS_OPERACIONAL_ESGOTADO
 from app.services.whatsapp_client import EnvioWhatsAppFalhou, WhatsAppNaoConfigurado, enviar_mensagem_texto
 
 ESTADO_AGUARDANDO_PRODUTO = "aguardando_produto"
@@ -38,6 +39,14 @@ ESTADO_AGUARDANDO_ESCOLHA_CONFIRMAR_PENDENTE = "aguardando_escolha_confirmar_pen
 ESTADO_AGUARDANDO_ESCOLHA_CANCELAR_PENDENTE = "aguardando_escolha_cancelar_pendente"
 
 NIVEIS_EM_RISCO = {NivelRisco.ATENCAO, NivelRisco.RISCO, NivelRisco.URGENTE, NivelRisco.VENCIDO}
+
+# RN06/RN07: status_operacional != disponivel (esgotado por venda,
+# descartado por retirada) significa que não há mais nada em estoque
+# para agir — não deve gerar alerta operacional, mesmo que o nível de
+# risco (RN01, calculado só pela validade) ainda esteja numa faixa de
+# risco. lotes.status continua "confirmado" nesses casos (RN07), então
+# esse filtro não pode vir de `status`.
+STATUS_OPERACIONAIS_SEM_ALERTA = {STATUS_OPERACIONAL_ESGOTADO, STATUS_OPERACIONAL_DESCARTADO}
 
 MENU = (
     "Olá! O que você quer fazer?\n"
@@ -106,6 +115,7 @@ def _listar_produtos_vencendo(db: Session, id_mercado: int) -> str:
         lote
         for lote in lote_service.listar(db, id_mercado, status=StatusLote.CONFIRMADO)
         if lote.nivel_risco in NIVEIS_EM_RISCO
+        and lote.status_operacional not in STATUS_OPERACIONAIS_SEM_ALERTA
     ]
     if not lotes:
         return "Nenhum produto próximo do vencimento no momento."

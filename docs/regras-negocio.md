@@ -177,6 +177,23 @@ continua podendo assumir tecnicamente (o tipo `StatusLote` do banco não
 foi alterado), mas que não são mais o mecanismo usado para refletir venda
 ou retirada — ver RN07.
 
+**Lotes esgotados/descartados não geram alerta operacional (correção de
+2026-08-26):** `nivel_risco` (RN01) é calculado só a partir da validade,
+sem nenhuma relação com estoque — um lote pode estar numa faixa de risco
+e, ao mesmo tempo, já não ter mais unidades disponíveis
+(`status_operacional` = `esgotado`/`descartado`). Como `lotes.status`
+permanece `confirmado` nesses casos (ver "Compatibilidade com RN07"
+acima), nenhuma lista ou alerta voltado para ação do comerciante pode
+filtrar só por `status`/`nivel_risco` — precisa também excluir
+`status_operacional` != `disponivel`, senão volta a mostrar produtos que
+já não existem mais em estoque. Implementado em
+`_listar_produtos_vencendo` (`backend/app/services/whatsapp_webhook_service.py`,
+única lista de risco ativa hoje). O job diário de recálculo (RN03) e o
+histórico de mudança de faixa continuam cobrindo todo lote confirmado,
+esgotado inclusive — o filtro é só na camada que decide o que vira
+alerta, nunca no cálculo de risco em si. Quando os alertas proativos por
+WhatsApp (RN03) forem implementados, o mesmo filtro se aplica lá.
+
 Cada lote também possui um campo `quantidade_inicial`. Enquanto o lote
 estiver `pendente_confirmacao`, `quantidade_inicial` pode ser corrigida
 (em sincronia com `quantidade`, via edição do cadastro — RN02). No

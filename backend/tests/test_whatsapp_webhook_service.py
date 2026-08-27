@@ -53,6 +53,7 @@ def _lote_orm(
     nivel_risco: NivelRisco = NivelRisco.URGENTE,
     data_validade: date = VENCENDO_LOGO,
     quantidade: Decimal = Decimal("10"),
+    status_operacional: str = "disponivel",
 ) -> LoteORM:
     return LoteORM(
         id=id_lote,
@@ -69,7 +70,7 @@ def _lote_orm(
         data_ultima_atualizacao=datetime.now(),
         criado_por=None,
         preco_custo=None,
-        status_operacional="disponivel",
+        status_operacional=status_operacional,
         quantidade_disponivel=quantidade,
         quantidade_inicial=quantidade,
     )
@@ -207,6 +208,52 @@ def test_escolha_2_com_lote_em_risco_mostra_nome_do_produto(db_mock, enviar_mock
 
     mensagem = enviar_mock.call_args[0][1]
     assert "Pão Francês" in mensagem
+
+
+def test_escolha_2_ignora_lote_esgotado_mesmo_em_risco(db_mock, enviar_mock):
+    # Regressão: um lote com saldo zerado por venda (RN07) continua
+    # status = confirmado e nivel_risco calculado só pela validade (RN01)
+    # — sem o filtro de status_operacional, ele voltaria a aparecer como
+    # "produto vencendo" mesmo sem nenhuma unidade em estoque.
+    _definir_lotes(db_mock, [_lote_orm(id_lote=1, status_operacional="esgotado")])
+    db_mock.produto_q.filter.return_value.all.return_value = [_produto_orm()]
+
+    webhook_service.processar_webhook(db_mock, _payload(TELEFONE, "2"))
+
+    enviar_mock.assert_called_once_with(
+        TELEFONE, "Nenhum produto próximo do vencimento no momento."
+    )
+
+
+def test_escolha_2_ignora_lote_descartado_mesmo_em_risco(db_mock, enviar_mock):
+    _definir_lotes(db_mock, [_lote_orm(id_lote=1, status_operacional="descartado")])
+    db_mock.produto_q.filter.return_value.all.return_value = [_produto_orm()]
+
+    webhook_service.processar_webhook(db_mock, _payload(TELEFONE, "2"))
+
+    enviar_mock.assert_called_once_with(
+        TELEFONE, "Nenhum produto próximo do vencimento no momento."
+    )
+
+
+def test_escolha_2_mistura_lote_disponivel_e_esgotado_mostra_so_disponivel(db_mock, enviar_mock):
+    _definir_lotes(
+        db_mock,
+        [
+            _lote_orm(id_lote=1, status_operacional="disponivel"),
+            _lote_orm(id_lote=2, id_produto=11, status_operacional="esgotado"),
+        ],
+    )
+    db_mock.produto_q.filter.return_value.all.return_value = [
+        _produto_orm(),
+        _produto_orm(id_produto=11, nome="Leite"),
+    ]
+
+    webhook_service.processar_webhook(db_mock, _payload(TELEFONE, "2"))
+
+    mensagem = enviar_mock.call_args[0][1]
+    assert "Pão Francês" in mensagem
+    assert "Leite" not in mensagem
     assert ID_USUARIO not in db_mock.sessoes  # consulta não inicia sessão
 
 
