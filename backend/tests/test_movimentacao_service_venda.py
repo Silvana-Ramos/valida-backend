@@ -48,7 +48,14 @@ def _lote_confirmado(status_operacional: str, quantidade_disponivel: Decimal, **
 
 def _mock_db(lote_orm: LoteORM | None) -> MagicMock:
     db = MagicMock()
-    db.get.return_value = lote_orm
+
+    def _fake_get(model, ident, **kwargs):
+        # db.get também é usado por hoje_do_mercado (RN01) para buscar
+        # MercadoORM — só LoteORM devolve o lote configurado; qualquer
+        # outro modelo cai no fallback de fuso (America/Sao_Paulo).
+        return lote_orm if model is LoteORM else None
+
+    db.get.side_effect = _fake_get
 
     def _fake_refresh(obj):
         # Simula o banco atribuindo o PK no INSERT real, já que aqui não
@@ -228,6 +235,6 @@ def test_select_for_update_com_populate_existing():
 
     registrar_venda(db, ID_MERCADO, ID_LOTE, request)
 
-    db.get.assert_called_once_with(
-        LoteORM, ID_LOTE, with_for_update=True, populate_existing=True
-    )
+    # db.get também é chamado para MercadoORM (hoje_do_mercado, RN01) —
+    # aqui importa só que o lote é travado com SELECT ... FOR UPDATE.
+    db.get.assert_any_call(LoteORM, ID_LOTE, with_for_update=True, populate_existing=True)

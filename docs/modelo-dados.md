@@ -75,7 +75,7 @@ Cada comércio cliente do Valida (tenant).
 | segmento | enum | padaria, açougue, hortifruti, farmácia, mercearia, conveniência, outro |
 | status | enum | ativo, inativo |
 | data_cadastro | timestamp | |
-| timezone | texto, opcional | (Migration 0002) fuso horário do mercado, para agendamento de relatórios/alertas |
+| timezone | texto, opcional | (Migration 0002) fuso horário do mercado (fuso IANA, ex. `America/Sao_Paulo`), usado para agendamento de relatórios/alertas e, desde 2026-08-26, para o cálculo de `dias_restantes`/`nivel_risco` (RN01) — `NULL` ou valor inválido usa o fallback `America/Sao_Paulo` |
 | horario_abertura | hora, opcional | (Migration 0002) horário de abertura do comércio |
 | horario_relatorio_diario | hora, opcional | (Migration 0002) horário configurado para envio do relatório diário |
 | relatorio_diario_ativo | boolean, not null, default false | (Migration 0002) liga/desliga o envio do relatório diário para este mercado |

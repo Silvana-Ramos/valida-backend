@@ -27,7 +27,7 @@ from app.models.historico_acao import HistoricoAcaoORM
 from app.models.lote import LoteORM
 from app.schemas.enums import StatusLote, TipoAcao
 from app.schemas.historico_acao import OrigemAcao
-from app.services.lote_service import calcular_risco
+from app.services.lote_service import calcular_risco, hoje_do_mercado
 
 
 @dataclass
@@ -76,7 +76,11 @@ def _recalcular_um(db: Session, id_lote: int) -> bool | None:
         db.rollback()
         return None
 
-    dias_restantes, nivel_risco_novo = calcular_risco(lote_orm.data_validade)
+    # RN01: "hoje" é resolvido por lote, a partir do fuso do mercado dono
+    # do lote — não existe um "hoje" único para a execução inteira do
+    # job, já que mercados diferentes podem estar em fusos diferentes.
+    hoje = hoje_do_mercado(db, lote_orm.id_mercado)
+    dias_restantes, nivel_risco_novo = calcular_risco(lote_orm.data_validade, hoje=hoje)
     nivel_risco_anterior = lote_orm.nivel_risco
 
     lote_orm.dias_restantes = dias_restantes

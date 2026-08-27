@@ -59,6 +59,15 @@ def db_mock():
             obj.id = 999
 
     db.refresh.side_effect = _fake_refresh
+
+    def _fake_get(model, ident, **kwargs):
+        # db.get também é usado por hoje_do_mercado (RN01) para buscar
+        # MercadoORM — só o lote configurado via db.get.return_value é
+        # devolvido para LoteORM; qualquer outro modelo cai no fallback
+        # de fuso horário (mercado não encontrado -> America/Sao_Paulo).
+        return db.get.return_value if model is LoteORM else None
+
+    db.get.side_effect = _fake_get
     app.dependency_overrides[get_db] = lambda: db
     yield db
     app.dependency_overrides.pop(get_db, None)

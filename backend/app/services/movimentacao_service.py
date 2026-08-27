@@ -27,7 +27,12 @@ from app.schemas.movimentacao_estoque import (
     TipoMovimentacao,
     VendaEstoqueRequest,
 )
-from app.services.lote_service import AcaoInvalidaParaStatus, LoteNaoEncontrado, calcular_risco
+from app.services.lote_service import (
+    AcaoInvalidaParaStatus,
+    LoteNaoEncontrado,
+    calcular_risco,
+    hoje_do_mercado,
+)
 
 STATUS_OPERACIONAL_DISPONIVEL = "disponivel"
 STATUS_OPERACIONAL_ESGOTADO = "esgotado"
@@ -193,7 +198,8 @@ def registrar_venda(
         if lote_orm.status != StatusLote.CONFIRMADO:
             raise AcaoInvalidaParaStatus(lote_orm.status)
 
-        dias_restantes, _ = calcular_risco(lote_orm.data_validade)
+        hoje = hoje_do_mercado(db, lote_orm.id_mercado)
+        dias_restantes, _ = calcular_risco(lote_orm.data_validade, hoje=hoje)
         if dias_restantes < 0:
             raise LoteVencidoNaoAceitaVenda(id_lote)
 
@@ -282,7 +288,8 @@ def registrar_retirada(
         if lote_orm.status != StatusLote.CONFIRMADO:
             raise AcaoInvalidaParaStatus(lote_orm.status)
 
-        dias_restantes, _ = calcular_risco(lote_orm.data_validade)
+        hoje = hoje_do_mercado(db, lote_orm.id_mercado)
+        dias_restantes, _ = calcular_risco(lote_orm.data_validade, hoje=hoje)
         if dias_restantes >= 0:
             raise LoteNaoVencidoNaoAceitaRetirada(id_lote)
 

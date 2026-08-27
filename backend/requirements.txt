@@ -6,6 +6,7 @@ python-dotenv
 sqlalchemy
 alembic
 psycopg2-binary
+tzdata
 pytest
 httpx
 python-multipart

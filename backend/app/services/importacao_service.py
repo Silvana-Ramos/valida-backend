@@ -14,7 +14,7 @@ naquela linha — o restante do arquivo continua.
 """
 
 import hashlib
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from pydantic import ValidationError
@@ -29,7 +29,7 @@ from app.schemas.importacao import StatusImportacao, StatusProcessamentoItem
 from app.schemas.movimentacao_estoque import OrigemMovimentacao, VendaEstoqueRequest
 from app.services import movimentacao_service
 from app.services.importacao_parser import ArquivoInvalido, parsear_csv
-from app.services.lote_service import AcaoInvalidaParaStatus, LoteNaoEncontrado
+from app.services.lote_service import AcaoInvalidaParaStatus, LoteNaoEncontrado, hoje_do_mercado
 from app.services.movimentacao_service import SaldoInsuficienteParaVenda
 
 MAX_LINHAS_IMPORTACAO = 500
@@ -118,7 +118,7 @@ def _resolver_lote(
             LoteORM.id_produto == id_produto,
             LoteORM.status == StatusLote.CONFIRMADO,
             LoteORM.quantidade_disponivel > 0,
-            LoteORM.data_validade >= date.today(),
+            LoteORM.data_validade >= hoje_do_mercado(db, id_mercado),
         )
         .order_by(LoteORM.data_validade.asc())
         .all()

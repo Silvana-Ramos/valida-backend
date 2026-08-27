@@ -8,11 +8,13 @@ mercado é tratado como inexistente (`LoteNaoEncontrado`), nunca como
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.models.historico_acao import HistoricoAcaoORM
 from app.models.lote import LoteORM
+from app.models.mercado import MercadoORM
 from app.schemas.enums import NivelRisco, OrigemCadastro, StatusLote, TipoAcao
 from app.schemas.historico_acao import OrigemAcao
 from app.schemas.lote import LoteCreateRequest, LoteEditRequest
@@ -53,6 +55,17 @@ def _lote(
     )
 
 
+def _fake_get(lote_orm):
+    """db.get é usado tanto para LoteORM (id_lote) quanto para MercadoORM
+    (hoje_do_mercado, RN01) — sem isso, um MagicMock.return_value único
+    devolveria o lote também na consulta de mercado."""
+
+    def _get(model, ident, **kwargs):
+        return lote_orm if model is LoteORM else None
+
+    return _get
+
+
 @pytest.fixture
 def db_mock():
     db = MagicMock()
@@ -63,7 +76,51 @@ def db_mock():
             obj.id = 999
 
     db.refresh.side_effect = refresh_side_effect
+    # Default seguro: qualquer db.get não sobrescrito pelo teste (ex.:
+    # MercadoORM, buscado por hoje_do_mercado, RN01) devolve None -> cai
+    # no fallback de fuso (America/Sao_Paulo), não num MagicMock genérico.
+    db.get.side_effect = lambda model, ident, **kwargs: None
     return db
+
+
+# --- hoje_do_mercado (RN01) ------------------------------------------------
+
+
+def test_hoje_do_mercado_usa_timezone_configurado_do_mercado(db_mock):
+    db_mock.get.side_effect = lambda model, ident, **kwargs: (
+        MercadoORM(id=ID_MERCADO, timezone="America/Noronha") if model is MercadoORM else None
+    )
+
+    hoje = lote_service.hoje_do_mercado(db_mock, ID_MERCADO)
+
+    assert hoje == datetime.now(ZoneInfo("America/Noronha")).date()
+
+
+def test_hoje_do_mercado_usa_fallback_quando_timezone_e_nulo(db_mock):
+    db_mock.get.side_effect = lambda model, ident, **kwargs: (
+        MercadoORM(id=ID_MERCADO, timezone=None) if model is MercadoORM else None
+    )
+
+    hoje = lote_service.hoje_do_mercado(db_mock, ID_MERCADO)
+
+    assert hoje == datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def test_hoje_do_mercado_usa_fallback_quando_timezone_e_invalido(db_mock):
+    db_mock.get.side_effect = lambda model, ident, **kwargs: (
+        MercadoORM(id=ID_MERCADO, timezone="Nao/Existe") if model is MercadoORM else None
+    )
+
+    hoje = lote_service.hoje_do_mercado(db_mock, ID_MERCADO)
+
+    assert hoje == datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def test_hoje_do_mercado_usa_fallback_quando_mercado_nao_encontrado(db_mock):
+    # db_mock.get já devolve None por padrão (ver fixture db_mock acima).
+    hoje = lote_service.hoje_do_mercado(db_mock, ID_MERCADO)
+
+    assert hoje == datetime.now(ZoneInfo("America/Sao_Paulo")).date()
 
 
 # --- criar_pendente ---------------------------------------------------------
@@ -87,7 +144,7 @@ def test_criar_pendente_cria_lote_pendente_confirmacao(db_mock):
 
 
 def test_obter_retorna_lote(db_mock):
-    db_mock.get.return_value = _lote()
+    db_mock.get.side_effect = _fake_get(_lote())
 
     lote = lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
 
@@ -95,14 +152,14 @@ def test_obter_retorna_lote(db_mock):
 
 
 def test_obter_lote_inexistente_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
 
 
 def test_obter_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
@@ -114,7 +171,7 @@ def test_obter_retorna_quantidade_disponivel_apos_venda(db_mock):
     # precisa refletir o estoque disponível atual, não o de cadastro.
     lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
     lote_orm.quantidade_disponivel = Decimal("9")  # simula venda de 1 unidade
-    db_mock.get.return_value = lote_orm
+    db_mock.get.side_effect = _fake_get(lote_orm)
 
     lote = lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
 
@@ -128,7 +185,7 @@ def test_obter_retorna_status_operacional_esgotado_apos_venda_zerar_saldo(db_moc
     lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("5"))
     lote_orm.quantidade_disponivel = Decimal("0")
     lote_orm.status_operacional = "esgotado"
-    db_mock.get.return_value = lote_orm
+    db_mock.get.side_effect = _fake_get(lote_orm)
 
     lote = lote_service.obter(db_mock, ID_MERCADO, ID_LOTE)
 
@@ -181,7 +238,7 @@ def test_listar_retorna_quantidade_disponivel_apos_venda(db_mock):
 
 
 def test_editar_pendente_atualiza_campos(db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.PENDENTE_CONFIRMACAO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.PENDENTE_CONFIRMACAO))
 
     lote = lote_service.editar_pendente(
         db_mock, ID_MERCADO, ID_LOTE, LoteEditRequest(quantidade=25)
@@ -191,14 +248,14 @@ def test_editar_pendente_atualiza_campos(db_mock):
 
 
 def test_editar_pendente_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.editar_pendente(db_mock, ID_MERCADO, ID_LOTE, LoteEditRequest(quantidade=25))
 
 
 def test_editar_pendente_lote_confirmado_levanta_acao_invalida(db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO))
 
     with pytest.raises(AcaoInvalidaParaStatus):
         lote_service.editar_pendente(db_mock, ID_MERCADO, ID_LOTE, LoteEditRequest(quantidade=25))
@@ -208,7 +265,7 @@ def test_editar_pendente_lote_confirmado_levanta_acao_invalida(db_mock):
 
 
 def test_confirmar_muda_status_para_confirmado(db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.PENDENTE_CONFIRMACAO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.PENDENTE_CONFIRMACAO))
 
     lote = lote_service.confirmar(db_mock, ID_MERCADO, ID_LOTE)
 
@@ -216,14 +273,14 @@ def test_confirmar_muda_status_para_confirmado(db_mock):
 
 
 def test_confirmar_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.confirmar(db_mock, ID_MERCADO, ID_LOTE)
 
 
 def test_confirmar_lote_ja_confirmado_levanta_acao_invalida(db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO))
 
     with pytest.raises(AcaoInvalidaParaStatus):
         lote_service.confirmar(db_mock, ID_MERCADO, ID_LOTE)
@@ -234,7 +291,7 @@ def test_confirmar_lote_ja_confirmado_levanta_acao_invalida(db_mock):
 
 def test_cancelar_remove_lote_pendente(db_mock):
     lote_orm = _lote(status=StatusLote.PENDENTE_CONFIRMACAO)
-    db_mock.get.return_value = lote_orm
+    db_mock.get.side_effect = _fake_get(lote_orm)
 
     lote_service.cancelar(db_mock, ID_MERCADO, ID_LOTE)
 
@@ -243,7 +300,7 @@ def test_cancelar_remove_lote_pendente(db_mock):
 
 
 def test_cancelar_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.cancelar(db_mock, ID_MERCADO, ID_LOTE)
@@ -251,7 +308,7 @@ def test_cancelar_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
 
 
 def test_cancelar_lote_confirmado_levanta_acao_invalida(db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO))
 
     with pytest.raises(AcaoInvalidaParaStatus):
         lote_service.cancelar(db_mock, ID_MERCADO, ID_LOTE)
@@ -262,7 +319,7 @@ def test_cancelar_lote_confirmado_levanta_acao_invalida(db_mock):
 
 
 def test_historico_do_lote_retorna_lista(db_mock):
-    db_mock.get.return_value = _lote()
+    db_mock.get.side_effect = _fake_get(_lote())
     db_mock.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
         HistoricoAcaoORM(
             id=1,
@@ -282,14 +339,14 @@ def test_historico_do_lote_retorna_lista(db_mock):
 
 
 def test_historico_do_lote_inexistente_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.historico_do_lote(db_mock, ID_MERCADO, ID_LOTE)
 
 
 def test_historico_do_lote_de_outro_mercado_levanta_nao_encontrado(db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     with pytest.raises(LoteNaoEncontrado):
         lote_service.historico_do_lote(db_mock, ID_MERCADO, ID_LOTE)

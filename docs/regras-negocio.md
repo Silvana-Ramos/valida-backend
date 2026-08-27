@@ -24,6 +24,20 @@ dias_restantes = data_validade − data_atual
 O nível de risco é sempre **calculado**, nunca definido manualmente pelo
 usuário.
 
+**Fuso horário de `data_atual` (correção de 2026-08-26):** `data_atual`
+é sempre a data corrente **no fuso horário do mercado** dono do lote
+(`mercados.timezone`), nunca o relógio/fuso do servidor onde a
+aplicação roda. Quando o mercado não tem `timezone` configurado
+(`NULL` — hoje a maioria, já que o campo foi criado na Migration 0002
+só para agendamento de relatórios/alertas e nunca foi preenchido para
+este fim) ou o valor salvo não é um fuso IANA reconhecido, usa-se o
+fallback padrão `America/Sao_Paulo`. Calcular com o fuso do servidor
+(tipicamente UTC no Railway) causava classificação incorreta perto da
+virada do dia — um lote podia ser tratado como vencido, ou deixar de
+ser, horas antes/depois do horário local do comércio. Implementado em
+`hoje_do_mercado` (`backend/app/services/lote_service.py`), usado por
+todo chamador de `calcular_risco`.
+
 ## RN02 — Confirmação obrigatória antes de gravar
 
 Todo cadastro de lote — originado por mensagem de texto, foto ou nota
@@ -78,7 +92,10 @@ não é uma requisição em nome de nenhum mercado, é uma rotina de
 sistema que processa cada lote isoladamente, um de cada vez. Cada lote
 é travado e commitado individualmente; um erro num lote fica
 registrado no resumo da execução e não impede os demais de serem
-processados. `dias_restantes`/`data_ultima_atualizacao` são sempre
+processados. `data_atual` (RN01) é resolvida **por lote**, a partir do
+fuso do mercado dono daquele lote — não existe um "hoje" único para a
+execução inteira do job, já que mercados diferentes podem estar em
+fusos diferentes. `dias_restantes`/`data_ultima_atualizacao` são sempre
 atualizados; `historico_acoes` só recebe um registro novo quando
 `nivel_risco` muda de faixa (`tipo_acao = status_alterado`,
 `origem = sistema` — primeiro uso real desses dois valores do

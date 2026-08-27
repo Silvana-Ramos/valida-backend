@@ -61,6 +61,17 @@ def _lote(
     )
 
 
+def _fake_get(lote_orm):
+    """db.get é usado tanto para LoteORM (id_lote) quanto para MercadoORM
+    (hoje_do_mercado, RN01) — sem isso, um MagicMock.return_value único
+    devolveria o lote também na consulta de mercado."""
+
+    def _get(model, ident, **kwargs):
+        return lote_orm if model is LoteORM else None
+
+    return _get
+
+
 @pytest.fixture
 def db_mock():
     db = MagicMock()
@@ -90,6 +101,10 @@ def db_mock():
             obj.id = 999
 
     db.refresh.side_effect = refresh_side_effect
+    # Default seguro: qualquer db.get não sobrescrito pelo teste (ex.:
+    # MercadoORM, buscado por hoje_do_mercado, RN01) devolve None -> cai
+    # no fallback de fuso (America/Sao_Paulo), não num MagicMock genérico.
+    db.get.side_effect = lambda model, ident, **kwargs: None
     app.dependency_overrides[get_db] = lambda: db
     yield db
     app.dependency_overrides.pop(get_db, None)
@@ -183,7 +198,7 @@ def test_listar_lotes_vazio_retorna_200(client, db_mock):
 
 
 def test_obter_lote_retorna_200(client, db_mock):
-    db_mock.get.return_value = _lote()
+    db_mock.get.side_effect = _fake_get(_lote())
 
     resposta = client.get(f"/lotes/{ID_LOTE}", headers=HEADER_VALIDO)
 
@@ -192,7 +207,7 @@ def test_obter_lote_retorna_200(client, db_mock):
 
 
 def test_obter_lote_nao_encontrado_retorna_404(client, db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     resposta = client.get(f"/lotes/{ID_LOTE}", headers=HEADER_VALIDO)
 
@@ -200,7 +215,7 @@ def test_obter_lote_nao_encontrado_retorna_404(client, db_mock):
 
 
 def test_obter_lote_de_outro_mercado_retorna_404(client, db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     resposta = client.get(f"/lotes/{ID_LOTE}", headers=HEADER_VALIDO)
 
@@ -211,7 +226,7 @@ def test_obter_lote_de_outro_mercado_retorna_404(client, db_mock):
 
 
 def test_editar_lote_retorna_200(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.PENDENTE_CONFIRMACAO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.PENDENTE_CONFIRMACAO))
 
     resposta = client.patch(
         f"/lotes/{ID_LOTE}", json={"quantidade": 25}, headers=HEADER_VALIDO
@@ -222,7 +237,7 @@ def test_editar_lote_retorna_200(client, db_mock):
 
 
 def test_editar_lote_nao_encontrado_retorna_404(client, db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     resposta = client.patch(
         f"/lotes/{ID_LOTE}", json={"quantidade": 25}, headers=HEADER_VALIDO
@@ -232,7 +247,7 @@ def test_editar_lote_nao_encontrado_retorna_404(client, db_mock):
 
 
 def test_editar_lote_de_outro_mercado_retorna_404(client, db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     resposta = client.patch(
         f"/lotes/{ID_LOTE}", json={"quantidade": 25}, headers=HEADER_VALIDO
@@ -242,7 +257,7 @@ def test_editar_lote_de_outro_mercado_retorna_404(client, db_mock):
 
 
 def test_editar_lote_status_invalido_retorna_409(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO))
 
     resposta = client.patch(
         f"/lotes/{ID_LOTE}", json={"quantidade": 25}, headers=HEADER_VALIDO
@@ -255,7 +270,7 @@ def test_editar_lote_status_invalido_retorna_409(client, db_mock):
 
 
 def test_confirmar_lote_retorna_200(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.PENDENTE_CONFIRMACAO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.PENDENTE_CONFIRMACAO))
 
     resposta = client.post(f"/lotes/{ID_LOTE}/confirmar", headers=HEADER_VALIDO)
 
@@ -264,7 +279,7 @@ def test_confirmar_lote_retorna_200(client, db_mock):
 
 
 def test_confirmar_lote_nao_encontrado_retorna_404(client, db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     resposta = client.post(f"/lotes/{ID_LOTE}/confirmar", headers=HEADER_VALIDO)
 
@@ -272,7 +287,7 @@ def test_confirmar_lote_nao_encontrado_retorna_404(client, db_mock):
 
 
 def test_confirmar_lote_de_outro_mercado_retorna_404(client, db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     resposta = client.post(f"/lotes/{ID_LOTE}/confirmar", headers=HEADER_VALIDO)
 
@@ -280,7 +295,7 @@ def test_confirmar_lote_de_outro_mercado_retorna_404(client, db_mock):
 
 
 def test_confirmar_lote_ja_confirmado_retorna_409(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO))
 
     resposta = client.post(f"/lotes/{ID_LOTE}/confirmar", headers=HEADER_VALIDO)
 
@@ -291,7 +306,7 @@ def test_confirmar_lote_ja_confirmado_retorna_409(client, db_mock):
 
 
 def test_cancelar_lote_retorna_204(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.PENDENTE_CONFIRMACAO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.PENDENTE_CONFIRMACAO))
 
     resposta = client.post(f"/lotes/{ID_LOTE}/cancelar", headers=HEADER_VALIDO)
 
@@ -300,7 +315,7 @@ def test_cancelar_lote_retorna_204(client, db_mock):
 
 
 def test_cancelar_lote_nao_encontrado_retorna_404(client, db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     resposta = client.post(f"/lotes/{ID_LOTE}/cancelar", headers=HEADER_VALIDO)
 
@@ -309,7 +324,7 @@ def test_cancelar_lote_nao_encontrado_retorna_404(client, db_mock):
 
 
 def test_cancelar_lote_de_outro_mercado_retorna_404(client, db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     resposta = client.post(f"/lotes/{ID_LOTE}/cancelar", headers=HEADER_VALIDO)
 
@@ -318,7 +333,7 @@ def test_cancelar_lote_de_outro_mercado_retorna_404(client, db_mock):
 
 
 def test_cancelar_lote_status_invalido_retorna_409(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO)
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO))
 
     resposta = client.post(f"/lotes/{ID_LOTE}/cancelar", headers=HEADER_VALIDO)
 
@@ -330,7 +345,7 @@ def test_cancelar_lote_status_invalido_retorna_409(client, db_mock):
 
 
 def test_historico_do_lote_retorna_lista(client, db_mock):
-    db_mock.get.return_value = _lote()
+    db_mock.get.side_effect = _fake_get(_lote())
     db_mock.historico_q.filter.return_value.order_by.return_value.all.return_value = [
         HistoricoAcaoORM(
             id=1,
@@ -352,7 +367,7 @@ def test_historico_do_lote_retorna_lista(client, db_mock):
 
 
 def test_historico_do_lote_nao_encontrado_retorna_404(client, db_mock):
-    db_mock.get.return_value = None
+    db_mock.get.side_effect = _fake_get(None)
 
     resposta = client.get(f"/lotes/{ID_LOTE}/historico", headers=HEADER_VALIDO)
 
@@ -360,7 +375,7 @@ def test_historico_do_lote_nao_encontrado_retorna_404(client, db_mock):
 
 
 def test_historico_do_lote_de_outro_mercado_retorna_404(client, db_mock):
-    db_mock.get.return_value = _lote(id_mercado=OUTRO_MERCADO)
+    db_mock.get.side_effect = _fake_get(_lote(id_mercado=OUTRO_MERCADO))
 
     resposta = client.get(f"/lotes/{ID_LOTE}/historico", headers=HEADER_VALIDO)
 
@@ -377,7 +392,7 @@ def test_historico_do_lote_de_outro_mercado_retorna_404(client, db_mock):
 
 
 def test_venda_de_1_em_lote_com_10_faz_get_unico_retornar_9(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10")))
 
     resposta_venda = client.post(
         f"/lotes/{ID_LOTE}/venda", json={"quantidade": 1}, headers=HEADER_VALIDO
@@ -393,7 +408,7 @@ def test_venda_de_1_em_lote_com_10_faz_get_unico_retornar_9(client, db_mock):
 
 def test_venda_de_1_em_lote_com_10_faz_get_lista_retornar_9(client, db_mock):
     lote_orm = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("10"))
-    db_mock.get.return_value = lote_orm
+    db_mock.get.side_effect = _fake_get(lote_orm)
     db_mock.lote_q.filter.return_value.all.return_value = [lote_orm]
 
     resposta_venda = client.post(
@@ -420,7 +435,7 @@ def test_venda_de_1_em_lote_com_10_faz_get_lista_retornar_9(client, db_mock):
 
 
 def test_venda_que_zera_saldo_faz_get_retornar_status_operacional_esgotado(client, db_mock):
-    db_mock.get.return_value = _lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("5"))
+    db_mock.get.side_effect = _fake_get(_lote(status=StatusLote.CONFIRMADO, quantidade=Decimal("5")))
 
     resposta_venda = client.post(
         f"/lotes/{ID_LOTE}/venda", json={"quantidade": 5}, headers=HEADER_VALIDO
