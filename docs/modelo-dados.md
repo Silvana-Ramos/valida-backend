@@ -55,6 +55,24 @@ conclui o item 6, e com ele **toda a "Ordem de implementação" abaixo está
 concluída** (itens 1 a 4 pelo schema da Migration 0003; item 5 pelos
 quatro serviços de movimentação; item 6 por este MVP de importação).
 
+As tabelas `relatorios_acao_diaria`, `itens_relatorio_diario` e
+`acoes_preventivas` foram criadas pela Migration 0007 (Gestão Preventiva
+de Perdas — Fase 1), já executada no banco principal. Cobrem a geração
+de um relatório diário por mercado com uma fotografia dos lotes em risco
+(`app/services/relatorio_acao_diaria_service.py`,
+`POST /relatorios-acao-diaria`,
+`GET /relatorios-acao-diaria/{id_relatorio}/itens`) e o registro/
+atualização de ações preventivas sobre os itens desse relatório
+(`app/services/acao_preventiva_service.py`,
+`POST /relatorios-acao-diaria/itens/{id_item_relatorio}/acoes`,
+`PATCH /relatorios-acao-diaria/acoes/{id_acao_preventiva}`). A execução
+diária automática, o consumo de `mercados.relatorio_diario_ativo`/
+`horario_relatorio_diario`, e a Fase 2 (`acao_movimentacoes`,
+`episodios_risco` e cálculo automático de perda evitada) — todos
+mencionados no docstring da migration ou já existentes como colunas sem
+uso — **não fazem parte desta implementação** (ver
+[`regras-negocio.md`](regras-negocio.md#rn08--gestão-preventiva-de-perdas-fase-1)).
+
 ## Nota sobre "lote"
 
 O termo **lote** é usado neste projeto para o registro de estoque em si
@@ -371,3 +389,107 @@ Valores iniciais (globais, conforme RN01):
 | risco | 4 | 7 |
 | atencao | 8 | 15 |
 | normal | 16 | null (+∞) |
+
+## `relatorios_acao_diaria`
+
+Um relatório por mercado/dia, com a fotografia agregada dos lotes em
+risco (RN08).
+
+| Campo | Tipo | Observação |
+|---|---|---|
+| id | PK | |
+| id_mercado | FK → mercados | isolamento entre comércios (RN05) |
+| data_referencia | data | dia a que o relatório se refere, no fuso do mercado (RN01) |
+| gerado_em | timestamp, not null, default now() | |
+| status | texto, not null, default `gerado` | VARCHAR(20) livre, sem CHECK/ENUM; único valor usado hoje |
+| qtd_vencidos | inteiro, not null, default 0 | |
+| qtd_vence_hoje | inteiro, not null, default 0 | itens com `dias_restantes == 0` — subconjunto de `qtd_urgentes`, não uma faixa própria de RN01 |
+| qtd_urgentes | inteiro, not null, default 0 | |
+| qtd_risco | inteiro, not null, default 0 | |
+| qtd_atencao | inteiro, not null, default 0 | |
+| valor_em_risco | decimal(14,2), not null, default 0 | soma do `valor_em_risco` dos itens não nulos |
+| total_acoes_recomendadas | inteiro, not null, default 0 | definido só na geração do relatório; nunca alterado por registrar/atualizar uma ação |
+| total_acoes_realizadas | inteiro, not null, default 0 | recalculado (contagem completa) quando o status de alguma ação vinculada muda — ver RN08 |
+
+Constraints: `UNIQUE (id_mercado, data_referencia)`
+(`uq_relatorio_diario_mercado_data`) — base da idempotência de geração
+(RN08). Índice `(id_mercado, data_referencia)`.
+
+**Estado atual de implementação:** geração idempotente via
+`relatorio_acao_diaria_service.gerar_ou_obter` — chamada repetida no
+mesmo dia devolve o relatório já existente, sem regenerar nem duplicar
+itens. Exposto via `POST /relatorios-acao-diaria` (200). **Não há
+execução automática/agendada** — a geração só acontece quando este
+endpoint é chamado explicitamente; `mercados.relatorio_diario_ativo` e
+`mercados.horario_relatorio_diario` (Migration 0002) não são lidos por
+nenhum código.
+
+## `itens_relatorio_diario`
+
+Fotografia de cada lote acionável (RN08) incluído em um relatório —
+gravada uma única vez na geração, nunca recalculada depois.
+
+| Campo | Tipo | Observação |
+|---|---|---|
+| id | PK | |
+| id_relatorio | FK → relatorios_acao_diaria | |
+| id_produto | FK → produtos | |
+| id_lote | FK → lotes | FK simples — diferente do padrão de FK composta com `id_mercado` usado em `movimentacoes_estoque`/`itens_importacao` |
+| data_validade | data | snapshot do lote no momento da geração |
+| quantidade_disponivel | numérico(14,3), not null | snapshot |
+| preco_custo | decimal(10,2), opcional | snapshot |
+| dias_restantes | inteiro, not null | snapshot (RN01) |
+| classificacao_validade | texto, not null | VARCHAR(20) livre, sem CHECK/ENUM; espelha os valores de `nivel_risco` |
+| prioridade | texto, not null | VARCHAR(20) livre, sem CHECK/ENUM; valores usados hoje: `CRITICA`, `ALTA`, `MEDIA`, `BAIXA` (RN08) |
+| valor_em_risco | decimal(14,2), opcional | `preco_custo × quantidade_disponivel`; `NULL` quando `preco_custo` é nulo |
+| acao_recomendada | texto, not null | texto fixo por nível de risco (RN08) |
+
+Constraints: `UNIQUE (id_relatorio, id_lote)` (`uq_item_relatorio_lote`).
+Índices em `id_relatorio` e `id_lote`.
+
+**Sem coluna `id_mercado`**: o isolamento por mercado (RN05) é garantido
+via JOIN até `relatorios_acao_diaria.id_mercado` na camada de serviço,
+não por uma coluna própria nesta tabela.
+
+**Estado atual de implementação:** gerada por
+`relatorio_acao_diaria_service.gerar_ou_obter`; listada via
+`GET /relatorios-acao-diaria/{id_relatorio}/itens`
+(`relatorio_acao_diaria_service.listar_itens`, leitura pura — não
+recalcula nada). Não existe hoje nenhuma tabela `acao_movimentacoes`
+nem `episodios_risco` (Fase 2) que consuma esta fotografia.
+
+## `acoes_preventivas`
+
+Ação preventiva registrada sobre um item do relatório diário (RN08).
+
+| Campo | Tipo | Observação |
+|---|---|---|
+| id | PK | |
+| id_item_relatorio | FK → itens_relatorio_diario | |
+| id_usuario_responsavel | FK → usuarios, opcional | |
+| acao_recomendada | texto, not null | sempre copiada do item; nunca aceita do cliente |
+| acao_realizada | texto, opcional | |
+| status | texto, not null, default `recomendada` | VARCHAR(20) livre, sem CHECK/ENUM; vocabulário aprovado (RN08): `recomendada`, `em_andamento`, `concluida`, `cancelada` |
+| data_inicio | timestamp, opcional | |
+| data_fim | timestamp, opcional | |
+| resultado_operacional | texto, opcional | |
+| observacao | texto, opcional | |
+| criada_em | timestamp, not null, default now() | |
+| atualizada_em | timestamp, not null, default now() | sem `onupdate` no banco — atualizado manualmente pela aplicação a cada mudança |
+
+Constraints: **sem `UNIQUE`** em `id_item_relatorio` — o banco permite
+múltiplas ações por item; a regra de "uma ação por item" na Fase 1 é
+garantida só na camada de aplicação (RN08), não por constraint. Índices
+em `id_item_relatorio` e `id_usuario_responsavel`.
+
+**Sem coluna `id_mercado`**: isolamento (RN05) via duplo JOIN
+(`id_item_relatorio → itens_relatorio_diario.id_relatorio →
+relatorios_acao_diaria.id_mercado`).
+
+**Estado atual de implementação:** `acao_preventiva_service.registrar`
+(idempotente por item — devolve a ação existente em vez de criar outra)
+e `acao_preventiva_service.atualizar`, expostos via
+`POST /relatorios-acao-diaria/itens/{id_item_relatorio}/acoes` e
+`PATCH /relatorios-acao-diaria/acoes/{id_acao_preventiva}`. Nenhum
+cálculo automático de "perda evitada" existe ainda — isso depende da
+Fase 2 (`acao_movimentacoes`/`episodios_risco`), não implementada.

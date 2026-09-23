@@ -327,3 +327,89 @@ usuário:
   `quantidade_inicial`; este adendo torna explícito que `entrada` segue a
   mesma regra (já implícito na fórmula de reconciliação acima, que só move
   `quantidade_disponivel`).
+
+## RN08 — Gestão Preventiva de Perdas (Fase 1)
+
+Gera diariamente, por mercado, uma fotografia dos lotes em risco de
+vencimento (`relatorios_acao_diaria` + `itens_relatorio_diario`), e
+permite registrar e acompanhar ações preventivas tomadas sobre eles
+(`acoes_preventivas`). Ver [`docs/modelo-dados.md`](modelo-dados.md)
+para a especificação técnica das 3 tabelas (Migration 0007).
+
+**Lote acionável (decisão da Gestão Preventiva — reaproveita RN01/RN06
+sem alterar o texto delas):** um lote entra na fotografia do dia quando,
+simultaneamente: `status = confirmado`; `nivel_risco` (RN01) está numa
+das faixas `atencao`/`risco`/`urgente`/`vencido` (`normal` fica de
+fora); `status_operacional` (RN06) é `disponivel` (`esgotado`/
+`descartado` ficam de fora) — mesmo critério já usado em
+`_listar_produtos_vencendo` (RN06).
+
+**Um relatório por mercado/dia:** `UNIQUE (id_mercado, data_referencia)`
+em `relatorios_acao_diaria`. A geração é idempotente: se já existe
+relatório para o dia (resolvido no fuso do mercado, RN01), a chamada
+devolve o existente sem regenerar nem duplicar itens.
+
+**Classificação, prioridade e valor em risco de cada item:**
+- `classificacao_validade` = `nivel_risco` (RN01), sem recálculo
+  próprio.
+- `prioridade`: mapeamento 1:1 com `nivel_risco` — `vencido → CRITICA`,
+  `urgente → ALTA`, `risco → MEDIA`, `atencao → BAIXA`.
+- `valor_em_risco` = `preco_custo × quantidade_disponivel`; `NULL`
+  quando `preco_custo` é nulo — nunca estimado.
+- `acao_recomendada`: texto fixo por nível de risco.
+- `qtd_vence_hoje`: contagem de itens com `dias_restantes == 0` —
+  subconjunto informativo de `qtd_urgentes` (faixa 0–3 dias de RN01),
+  não uma faixa própria.
+
+**Ações preventivas (Fase 1):**
+- Uma ação por item: garantida só na camada de aplicação (o registro
+  procura uma ação já existente antes de criar outra); não há `UNIQUE`
+  no banco para isso — uma constraint equivalente poderá ser avaliada
+  numa migration futura.
+- `acao_recomendada` da ação é sempre copiada do item, nunca aceita do
+  cliente.
+- Status permitidos: `recomendada` (default — registrada, ainda não
+  iniciada), `em_andamento`, `concluida` (único que conta para
+  `total_acoes_realizadas`), `cancelada`. Sem regra de transição entre
+  eles nesta fase — qualquer valor fora do vocabulário é rejeitado.
+- `total_acoes_recomendadas` é definido só pela geração do relatório —
+  nunca alterado ao registrar ou atualizar uma ação.
+- `total_acoes_realizadas` é recalculado (contagem completa das ações
+  `concluida` vinculadas ao relatório, nunca incremento/decremento)
+  sempre que uma atualização altera o `status` de uma ação.
+
+**Isolamento por mercado (RN05):** `relatorios_acao_diaria` tem
+`id_mercado` direto. `itens_relatorio_diario` e `acoes_preventivas` não
+têm essa coluna — o isolamento é garantido via JOIN até
+`relatorios_acao_diaria.id_mercado` na camada de serviço.
+
+**Estado atual de implementação:** completo — models, schemas,
+`app/services/relatorio_acao_diaria_service.py` (`gerar_ou_obter`,
+`listar_itens`), `app/services/acao_preventiva_service.py`
+(`registrar`, `atualizar`), e o router
+`app/routers/relatorios_acao_diaria.py`
+(`POST /relatorios-acao-diaria`,
+`GET /relatorios-acao-diaria/{id_relatorio}/itens`,
+`POST /relatorios-acao-diaria/itens/{id_item_relatorio}/acoes`,
+`PATCH /relatorios-acao-diaria/acoes/{id_acao_preventiva}`), registrado
+em `main.py`.
+
+**Ainda NÃO implementado nesta fase:**
+- Nenhum job/script diário que chame `gerar_ou_obter` automaticamente —
+  a geração hoje só acontece sob demanda, via chamada HTTP explícita
+  (mesma situação de "ainda não agendado" já descrita na RN03). Não há
+  agendador (cron, Task Scheduler, ou equivalente da hospedagem)
+  configurado para este relatório.
+- Nenhum consumo dos campos `mercados.relatorio_diario_ativo`/
+  `horario_relatorio_diario` (Migration 0002) — continuam existindo no
+  banco, mas sem nenhum leitor no código; a geração não verifica se o
+  mercado tem o relatório diário "ativado", nem respeita o horário
+  configurado.
+- `acao_movimentacoes` — tabela da Fase 2, não criada, não implementada.
+- `episodios_risco` — tabela da Fase 2, não criada, não implementada.
+- Cálculo automático de "perda evitada" — funcionalidade da Fase 2, não
+  implementada; nenhum campo ou lógica desta fase calcula valor
+  efetivamente economizado.
+- Envio de alertas proativos relacionados a este relatório (depende,
+  além de tudo acima, dos Message Templates pré-aprovados pela Meta —
+  mesma pendência já registrada na RN03).
