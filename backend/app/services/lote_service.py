@@ -41,13 +41,22 @@ def hoje_do_mercado(db: Session, id_mercado: int) -> date:
     Sem isso, um lote pode ser classificado como vencido (ou deixar de
     ser) horas antes/depois do que seria no horário local do comércio,
     perto da virada do dia."""
+    return agora_do_mercado(db, id_mercado).date()
+
+
+def agora_do_mercado(db: Session, id_mercado: int) -> datetime:
+    """Mesma resolução de fuso horário de hoje_do_mercado (RN01), mas
+    devolvendo o datetime completo — necessário para comparar contra um
+    horário configurado (ex.: mercados.horario_relatorio_diario), não só
+    a data. hoje_do_mercado reaproveita esta função, em vez de duplicar
+    a resolução de fuso."""
     mercado_orm = db.get(MercadoORM, id_mercado)
     fuso = (mercado_orm.timezone if mercado_orm else None) or FUSO_PADRAO
     try:
         zona = ZoneInfo(fuso)
     except ZoneInfoNotFoundError:
         zona = ZoneInfo(FUSO_PADRAO)
-    return datetime.now(zona).date()
+    return datetime.now(zona)
 
 
 def calcular_risco(data_validade: date, hoje: date | None = None) -> tuple[int, NivelRisco]:

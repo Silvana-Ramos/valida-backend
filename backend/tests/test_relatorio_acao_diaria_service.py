@@ -1,7 +1,7 @@
 """Testes unitários de app/services/relatorio_acao_diaria_service.py
 (Session mockada, sem banco real)."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -10,8 +10,10 @@ import pytest
 
 from app.models.item_relatorio_diario import ItemRelatorioDiarioORM
 from app.models.lote import LoteORM
+from app.models.mercado import MercadoORM
 from app.models.relatorio_acao_diaria import RelatorioAcaoDiarioORM
 from app.schemas.enums import NivelRisco, OrigemCadastro, StatusLote
+from app.schemas.mercado import SegmentoMercado, StatusMercado
 from app.services import relatorio_acao_diaria_service as service
 from app.services.relatorio_acao_diaria_service import (
     ACAO_RECOMENDADA_POR_NIVEL,
@@ -541,3 +543,139 @@ def test_listar_itens_nao_reexecuta_calculo_de_risco():
     calcular_mock.assert_not_called()
     assert resultado[0].dias_restantes == item_persistido.dias_restantes
     assert resultado[0].classificacao_validade == item_persistido.classificacao_validade
+
+
+# =============================================================================
+# gerar_para_mercados_ativos
+# =============================================================================
+
+
+def _mercado(
+    id_mercado: int,
+    ativo: bool = True,
+    horario_relatorio_diario: time | None = None,
+    timezone: str | None = None,
+) -> MercadoORM:
+    return MercadoORM(
+        id=id_mercado,
+        nome="Mercado Teste",
+        telefone_whatsapp=f"+5511999900{id_mercado:03d}",
+        segmento=SegmentoMercado.OUTRO,
+        status=StatusMercado.ATIVO,
+        data_cadastro=datetime.now(),
+        timezone=timezone,
+        horario_abertura=None,
+        horario_relatorio_diario=horario_relatorio_diario,
+        relatorio_diario_ativo=ativo,
+        limite_valor_atencao=None,
+        limite_quantidade_atencao=None,
+    )
+
+
+def _db_mock_gerar_para_mercados_ativos(mercados: list[MercadoORM]) -> MagicMock:
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = mercados
+    por_id = {m.id: m for m in mercados}
+    db.get.side_effect = lambda model, ident, **kwargs: (
+        por_id.get(ident) if model is MercadoORM else None
+    )
+    return db
+
+
+def test_gerar_para_mercados_ativos_sem_mercado_ativo_retorna_resumo_zerado():
+    db = _db_mock_gerar_para_mercados_ativos([])
+
+    resumo = service.gerar_para_mercados_ativos(db)
+
+    assert resumo.total_mercados_ativos == 0
+    assert resumo.total_processados == 0
+    assert resumo.total_aguardando_horario == 0
+    assert resumo.mercados_sem_horario_configurado == []
+    assert resumo.erros == []
+
+
+def test_gerar_para_mercados_ativos_ignora_mercado_sem_horario_configurado():
+    mercado = _mercado(1, horario_relatorio_diario=None)
+    db = _db_mock_gerar_para_mercados_ativos([mercado])
+
+    with patch("app.services.relatorio_acao_diaria_service.gerar_ou_obter") as mock_gerar:
+        resumo = service.gerar_para_mercados_ativos(db)
+
+    mock_gerar.assert_not_called()
+    assert resumo.mercados_sem_horario_configurado == [1]
+    assert resumo.total_processados == 0
+
+
+def test_gerar_para_mercados_ativos_nao_gera_quando_horario_ainda_nao_chegou():
+    # 23:59 no fuso do mercado dificilmente já passou no momento em que o
+    # teste roda (mesma tolerância a fragilidade de horário já aceita em
+    # outros testes deste arquivo, ex. HOJE).
+    mercado = _mercado(1, horario_relatorio_diario=time(23, 59))
+    db = _db_mock_gerar_para_mercados_ativos([mercado])
+
+    with patch("app.services.relatorio_acao_diaria_service.gerar_ou_obter") as mock_gerar:
+        resumo = service.gerar_para_mercados_ativos(db)
+
+    mock_gerar.assert_not_called()
+    assert resumo.total_aguardando_horario == 1
+    assert resumo.total_processados == 0
+
+
+def test_gerar_para_mercados_ativos_gera_quando_horario_ja_passou():
+    mercado = _mercado(1, horario_relatorio_diario=time(0, 0))
+    db = _db_mock_gerar_para_mercados_ativos([mercado])
+
+    with patch("app.services.relatorio_acao_diaria_service.gerar_ou_obter") as mock_gerar:
+        resumo = service.gerar_para_mercados_ativos(db)
+
+    mock_gerar.assert_called_once_with(db, 1)
+    assert resumo.total_processados == 1
+    assert resumo.total_aguardando_horario == 0
+
+
+def test_gerar_para_mercados_ativos_erro_em_um_mercado_nao_impede_os_demais():
+    mercado_ok = _mercado(1, horario_relatorio_diario=time(0, 0))
+    mercado_com_erro = _mercado(2, horario_relatorio_diario=time(0, 0))
+    db = _db_mock_gerar_para_mercados_ativos([mercado_ok, mercado_com_erro])
+
+    def _gerar_side_effect(db_arg, id_mercado):
+        if id_mercado == 2:
+            raise RuntimeError("falha simulada")
+        return None
+
+    with patch(
+        "app.services.relatorio_acao_diaria_service.gerar_ou_obter",
+        side_effect=_gerar_side_effect,
+    ):
+        resumo = service.gerar_para_mercados_ativos(db)
+
+    assert resumo.total_processados == 1
+    assert len(resumo.erros) == 1
+    assert "mercado 2" in resumo.erros[0]
+    db.rollback.assert_called_once()
+
+
+def test_gerar_para_mercados_ativos_query_filtra_por_relatorio_diario_ativo():
+    db = _db_mock_gerar_para_mercados_ativos([])
+
+    service.gerar_para_mercados_ativos(db)
+
+    clausulas = db.query.return_value.filter.call_args.args
+    filtro_esperado = MercadoORM.relatorio_diario_ativo.is_(True)
+    assert any(c.compare(filtro_esperado) for c in clausulas)
+
+
+def test_gerar_para_mercados_ativos_nao_duplica_regra_de_geracao():
+    mercado = _mercado(1, horario_relatorio_diario=time(0, 0))
+    db = _db_mock_gerar_para_mercados_ativos([mercado])
+
+    with patch(
+        "app.services.relatorio_acao_diaria_service.gerar_ou_obter", return_value=None
+    ) as mock_gerar:
+        service.gerar_para_mercados_ativos(db)
+
+    mock_gerar.assert_called_once_with(db, 1)
+    # Toda escrita real fica dentro de gerar_ou_obter (patchada aqui) — esta
+    # função nunca deve tocar db.add/db.commit diretamente.
+    db.add.assert_not_called()
+    db.commit.assert_not_called()

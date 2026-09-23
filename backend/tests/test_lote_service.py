@@ -123,6 +123,57 @@ def test_hoje_do_mercado_usa_fallback_quando_mercado_nao_encontrado(db_mock):
     assert hoje == datetime.now(ZoneInfo("America/Sao_Paulo")).date()
 
 
+# --- agora_do_mercado (mesma resolução de fuso de hoje_do_mercado, RN01) ---
+# Datetimes completos não podem ser comparados por igualdade exata (o
+# instante muda entre a chamada da implementação e a captura do valor
+# esperado no teste) — por isso a tolerância de poucos segundos abaixo.
+
+
+def test_agora_do_mercado_usa_timezone_configurado_do_mercado(db_mock):
+    db_mock.get.side_effect = lambda model, ident, **kwargs: (
+        MercadoORM(id=ID_MERCADO, timezone="America/Noronha") if model is MercadoORM else None
+    )
+
+    agora = lote_service.agora_do_mercado(db_mock, ID_MERCADO)
+    esperado = datetime.now(ZoneInfo("America/Noronha"))
+
+    assert agora.tzname() == esperado.tzname()
+    assert abs((esperado - agora).total_seconds()) < 2
+
+
+def test_agora_do_mercado_usa_fallback_quando_timezone_e_nulo(db_mock):
+    db_mock.get.side_effect = lambda model, ident, **kwargs: (
+        MercadoORM(id=ID_MERCADO, timezone=None) if model is MercadoORM else None
+    )
+
+    agora = lote_service.agora_do_mercado(db_mock, ID_MERCADO)
+    esperado = datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+    assert agora.tzname() == esperado.tzname()
+    assert abs((esperado - agora).total_seconds()) < 2
+
+
+def test_agora_do_mercado_usa_fallback_quando_timezone_e_invalido(db_mock):
+    db_mock.get.side_effect = lambda model, ident, **kwargs: (
+        MercadoORM(id=ID_MERCADO, timezone="Nao/Existe") if model is MercadoORM else None
+    )
+
+    agora = lote_service.agora_do_mercado(db_mock, ID_MERCADO)
+    esperado = datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+    assert agora.tzname() == esperado.tzname()
+    assert abs((esperado - agora).total_seconds()) < 2
+
+
+def test_agora_do_mercado_usa_fallback_quando_mercado_nao_encontrado(db_mock):
+    # db_mock.get já devolve None por padrão (ver fixture db_mock acima).
+    agora = lote_service.agora_do_mercado(db_mock, ID_MERCADO)
+    esperado = datetime.now(ZoneInfo("America/Sao_Paulo"))
+
+    assert agora.tzname() == esperado.tzname()
+    assert abs((esperado - agora).total_seconds()) < 2
+
+
 # --- criar_pendente ---------------------------------------------------------
 
 

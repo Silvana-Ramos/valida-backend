@@ -16,6 +16,7 @@ mercado, então uma inconsistência precisa interromper a geração inteira
 sem deixar nada parcialmente gravado (ver QuantidadeDisponivelInconsistente).
 """
 
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
@@ -23,11 +24,12 @@ from sqlalchemy.orm import Session
 
 from app.models.item_relatorio_diario import ItemRelatorioDiarioORM
 from app.models.lote import LoteORM
+from app.models.mercado import MercadoORM
 from app.models.relatorio_acao_diaria import RelatorioAcaoDiarioORM
 from app.schemas.enums import NivelRisco, StatusLote
 from app.schemas.item_relatorio_diario import ItemRelatorioDiario
 from app.schemas.relatorio_acao_diaria import RelatorioAcaoDiario
-from app.services.lote_service import calcular_risco, hoje_do_mercado
+from app.services.lote_service import agora_do_mercado, calcular_risco, hoje_do_mercado
 from app.services.movimentacao_service import (
     STATUS_OPERACIONAL_DESCARTADO,
     STATUS_OPERACIONAL_ESGOTADO,
@@ -160,6 +162,57 @@ def listar_itens(db: Session, id_mercado: int, id_relatorio: int) -> list[ItemRe
         .all()
     )
     return [ItemRelatorioDiario.model_validate(item, from_attributes=True) for item in itens_orm]
+
+
+@dataclass
+class ResumoGeracaoDiaria:
+    total_mercados_ativos: int = 0
+    total_processados: int = 0
+    total_aguardando_horario: int = 0
+    mercados_sem_horario_configurado: list[int] = field(default_factory=list)
+    erros: list[str] = field(default_factory=list)
+
+
+def gerar_para_mercados_ativos(db: Session) -> ResumoGeracaoDiaria:
+    """Gera (ou obtém, já existente) o relatório diário de cada mercado
+    com relatorio_diario_ativo=True cujo horario_relatorio_diario (hora
+    local do mercado) já tenha passado. Reaproveita gerar_ou_obter —
+    nenhuma regra de geração do relatório é duplicada aqui; esta função
+    só decide QUAIS mercados estão devidos nesta rodada.
+
+    Mercado ativo sem horario_relatorio_diario configurado NÃO é gerado
+    automaticamente, não usa nenhum horário padrão silencioso, e não é
+    desativado — só fica registrado em mercados_sem_horario_configurado
+    para o chamador (script) reportar como configuração incompleta.
+
+    Erro num mercado é isolado (capturado, registrado em erros) e não
+    impede o processamento dos demais — mesmo padrão de
+    recalculo_risco_service.recalcular_todos."""
+    resumo = ResumoGeracaoDiaria()
+
+    mercados_ativos = (
+        db.query(MercadoORM).filter(MercadoORM.relatorio_diario_ativo.is_(True)).all()
+    )
+    resumo.total_mercados_ativos = len(mercados_ativos)
+
+    for mercado in mercados_ativos:
+        if mercado.horario_relatorio_diario is None:
+            resumo.mercados_sem_horario_configurado.append(mercado.id)
+            continue
+
+        agora = agora_do_mercado(db, mercado.id)
+        if agora.time() < mercado.horario_relatorio_diario:
+            resumo.total_aguardando_horario += 1
+            continue
+
+        try:
+            gerar_ou_obter(db, mercado.id)
+            resumo.total_processados += 1
+        except Exception as exc:
+            db.rollback()
+            resumo.erros.append(f"mercado {mercado.id}: {exc}")
+
+    return resumo
 
 
 def _montar_itens(db: Session, id_mercado: int, hoje: date) -> list[ItemRelatorioDiarioORM]:
