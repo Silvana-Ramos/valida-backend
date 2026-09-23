@@ -25,6 +25,7 @@ from app.models.item_relatorio_diario import ItemRelatorioDiarioORM
 from app.models.lote import LoteORM
 from app.models.relatorio_acao_diaria import RelatorioAcaoDiarioORM
 from app.schemas.enums import NivelRisco, StatusLote
+from app.schemas.item_relatorio_diario import ItemRelatorioDiario
 from app.schemas.relatorio_acao_diaria import RelatorioAcaoDiario
 from app.services.lote_service import calcular_risco, hoje_do_mercado
 from app.services.movimentacao_service import (
@@ -63,6 +64,10 @@ class QuantidadeDisponivelInconsistente(Exception):
     inconsistência de dado que interrompe a geração inteira, nunca
     contornada com uma quantidade inventada ou com o campo `quantidade`
     legado."""
+
+
+class RelatorioNaoEncontrado(Exception):
+    pass
 
 
 def gerar_ou_obter(
@@ -129,6 +134,32 @@ def gerar_ou_obter(
 
     db.refresh(relatorio_orm)
     return RelatorioAcaoDiario.model_validate(relatorio_orm, from_attributes=True)
+
+
+def listar_itens(db: Session, id_mercado: int, id_relatorio: int) -> list[ItemRelatorioDiario]:
+    """Lista os itens já persistidos de um relatório (RN05: só do mesmo
+    mercado). Não chama gerar_ou_obter nem recalcula nada — só lê a
+    fotografia já gravada."""
+    relatorio_orm = (
+        db.query(RelatorioAcaoDiarioORM)
+        .filter(
+            RelatorioAcaoDiarioORM.id == id_relatorio,
+            RelatorioAcaoDiarioORM.id_mercado == id_mercado,
+        )
+        .first()
+    )
+    if relatorio_orm is None:
+        # RN05: relatório inexistente ou de outro mercado levanta a mesma
+        # exceção — não revela que um relatório de outro mercado existe.
+        raise RelatorioNaoEncontrado(id_relatorio)
+
+    itens_orm = (
+        db.query(ItemRelatorioDiarioORM)
+        .filter(ItemRelatorioDiarioORM.id_relatorio == id_relatorio)
+        .order_by(ItemRelatorioDiarioORM.id)
+        .all()
+    )
+    return [ItemRelatorioDiario.model_validate(item, from_attributes=True) for item in itens_orm]
 
 
 def _montar_itens(db: Session, id_mercado: int, hoje: date) -> list[ItemRelatorioDiarioORM]:

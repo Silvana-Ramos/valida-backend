@@ -16,6 +16,7 @@ from app.services import relatorio_acao_diaria_service as service
 from app.services.relatorio_acao_diaria_service import (
     ACAO_RECOMENDADA_POR_NIVEL,
     QuantidadeDisponivelInconsistente,
+    RelatorioNaoEncontrado,
 )
 
 ID_MERCADO = 5
@@ -385,3 +386,158 @@ def test_lote_acionavel_mas_sem_estoque_fica_fora_do_relatorio(status_operaciona
 
     assert relatorio.qtd_urgentes == 0
     assert _itens_adicionados(db) == []
+
+
+# =============================================================================
+# listar_itens
+# =============================================================================
+
+
+def _relatorio(id_relatorio: int = 100, id_mercado: int = ID_MERCADO) -> RelatorioAcaoDiarioORM:
+    return RelatorioAcaoDiarioORM(
+        id=id_relatorio,
+        id_mercado=id_mercado,
+        data_referencia=HOJE,
+        gerado_em=datetime.now(),
+        status="gerado",
+        qtd_vencidos=0,
+        qtd_vence_hoje=0,
+        qtd_urgentes=0,
+        qtd_risco=0,
+        qtd_atencao=0,
+        valor_em_risco=Decimal("0"),
+        total_acoes_recomendadas=0,
+        total_acoes_realizadas=0,
+    )
+
+
+def _item(id_item: int, id_relatorio: int) -> ItemRelatorioDiarioORM:
+    return ItemRelatorioDiarioORM(
+        id=id_item,
+        id_relatorio=id_relatorio,
+        id_produto=1,
+        id_lote=1,
+        data_validade=HOJE + timedelta(days=2),
+        quantidade_disponivel=Decimal("10"),
+        preco_custo=Decimal("2.50"),
+        dias_restantes=2,
+        classificacao_validade="urgente",
+        prioridade="ALTA",
+        valor_em_risco=Decimal("25.00"),
+        acao_recomendada=ACAO_RECOMENDADA_POR_NIVEL[NivelRisco.URGENTE],
+    )
+
+
+def _db_mock_listar_itens(relatorio_orm, itens=None) -> MagicMock:
+    db = MagicMock()
+    # Cadeia própria (.filter().first() para o relatório,
+    # .filter().order_by().all() para os itens) — distinta da usada por
+    # _db_mock (.filter().all()/.filter().first() para lotes/relatório de
+    # gerar_ou_obter). listar_itens nunca é chamada junto de
+    # gerar_ou_obter no mesmo teste, então não há colisão entre os dois
+    # helpers.
+    db.query.return_value.filter.return_value.first.return_value = relatorio_orm
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = itens or []
+    return db
+
+
+def test_listar_itens_relatorio_existente_retorna_seus_itens():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    itens = [_item(1, id_relatorio=100), _item(2, id_relatorio=100)]
+    db = _db_mock_listar_itens(relatorio_orm, itens=itens)
+
+    resultado = service.listar_itens(db, ID_MERCADO, 100)
+
+    assert len(resultado) == 2
+    assert {item.id for item in resultado} == {1, 2}
+
+
+def test_listar_itens_relatorio_sem_itens_retorna_lista_vazia():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    db = _db_mock_listar_itens(relatorio_orm, itens=[])
+
+    resultado = service.listar_itens(db, ID_MERCADO, 100)
+
+    assert resultado == []
+
+
+def test_listar_itens_relatorio_inexistente_levanta_relatorio_nao_encontrado():
+    db = _db_mock_listar_itens(relatorio_orm=None)
+
+    with pytest.raises(RelatorioNaoEncontrado):
+        service.listar_itens(db, ID_MERCADO, 999)
+
+
+def test_listar_itens_relatorio_de_outro_mercado_levanta_mesma_excecao():
+    # A query real (id == id_relatorio AND id_mercado == id_mercado) não
+    # encontraria nenhuma linha para um relatório de outro mercado —
+    # simulamos exatamente esse resultado (None), igual ao teste de
+    # relatório inexistente. É esperado que os dois testes sejam
+    # mecanicamente idênticos: isso comprova que o service não consegue
+    # (nem deve) diferenciar os dois casos.
+    db = _db_mock_listar_itens(relatorio_orm=None)
+
+    with pytest.raises(RelatorioNaoEncontrado):
+        service.listar_itens(db, ID_MERCADO, 100)
+
+
+def test_query_de_itens_filtra_pelo_id_relatorio_validado():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    db = _db_mock_listar_itens(relatorio_orm, itens=[])
+
+    service.listar_itens(db, ID_MERCADO, 100)
+
+    clausulas = db.query.return_value.filter.call_args.args
+    filtro_esperado = ItemRelatorioDiarioORM.id_relatorio == 100
+    assert any(c.compare(filtro_esperado) for c in clausulas)
+
+
+def test_query_de_relatorio_filtra_por_id_relatorio_e_id_mercado_simultaneamente():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    db = _db_mock_listar_itens(relatorio_orm, itens=[])
+
+    service.listar_itens(db, ID_MERCADO, 100)
+
+    # A primeira chamada de .filter(...) no nó compartilhado corresponde à
+    # query do relatório (a segunda, capturada por .call_args, é a dos
+    # itens) — call_args_list preserva a ordem real das chamadas.
+    clausulas_relatorio = db.query.return_value.filter.call_args_list[0].args
+    filtro_id = RelatorioAcaoDiarioORM.id == 100
+    filtro_mercado = RelatorioAcaoDiarioORM.id_mercado == ID_MERCADO
+    assert any(c.compare(filtro_id) for c in clausulas_relatorio)
+    assert any(c.compare(filtro_mercado) for c in clausulas_relatorio)
+
+
+def test_listar_itens_nao_chama_gerar_ou_obter():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    db = _db_mock_listar_itens(relatorio_orm, itens=[])
+
+    with patch("app.services.relatorio_acao_diaria_service.gerar_ou_obter") as gerar_mock:
+        service.listar_itens(db, ID_MERCADO, 100)
+
+    gerar_mock.assert_not_called()
+
+
+def test_listar_itens_nao_grava_nada():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    itens = [_item(1, id_relatorio=100)]
+    db = _db_mock_listar_itens(relatorio_orm, itens=itens)
+
+    service.listar_itens(db, ID_MERCADO, 100)
+
+    db.add.assert_not_called()
+    db.commit.assert_not_called()
+    db.flush.assert_not_called()
+
+
+def test_listar_itens_nao_reexecuta_calculo_de_risco():
+    relatorio_orm = _relatorio(id_relatorio=100)
+    item_persistido = _item(1, id_relatorio=100)
+    db = _db_mock_listar_itens(relatorio_orm, itens=[item_persistido])
+
+    with patch("app.services.relatorio_acao_diaria_service.calcular_risco") as calcular_mock:
+        resultado = service.listar_itens(db, ID_MERCADO, 100)
+
+    calcular_mock.assert_not_called()
+    assert resultado[0].dias_restantes == item_persistido.dias_restantes
+    assert resultado[0].classificacao_validade == item_persistido.classificacao_validade
