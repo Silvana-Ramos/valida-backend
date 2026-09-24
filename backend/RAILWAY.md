@@ -46,6 +46,59 @@ por serviço, no painel:
      serviço web.
    - Mesmas variáveis de ambiente do item 3 (pelo menos `DATABASE_URL`,
      herdada do plugin do Postgres se estiver no mesmo projeto).
+5. **Serviço de cron separado, para a geração automática do relatório
+   diário da Gestão Preventiva (RN08)**, nome sugerido
+   `cron-relatorio-diario-preventivo`, apontando para o mesmo
+   repositório/Root Directory (`backend`), mas com:
+   - **Start Command** sobrescrito para
+     `python scripts/gerar_relatorios_diarios.py`
+   - **Cron Schedule** definido no painel do serviço — recomendado
+     `*/30 * * * *`, ou seja, **uma tentativa de execução a cada 30
+     minutos**, todos os dias. O Railway interpreta esse agendamento em
+     **UTC**, não no fuso de nenhum mercado nem do servidor — mas isso
+     não afeta a correção do resultado: o horário efetivo de cada
+     mercado é decidido pela própria aplicação, usando o fuso **local**
+     de cada mercado (`agora_do_mercado`, RN01), independente da hora
+     UTC em que o Railway de fato disparou a execução. Rodar a cada 30
+     minutos serve só para não deixar passar muito tempo entre o
+     horário configurado e a geração de fato, e para recuperar
+     automaticamente uma execução perdida ainda dentro do mesmo dia.
+   - Se uma execução anterior ainda estiver em andamento quando a
+     próxima estiver agendada para começar, o Railway pode pular essa
+     próxima execução (comportamento padrão de cron jobs da plataforma)
+     — inofensivo aqui, porque a próxima tentativa (30 minutos depois)
+     cobre o mesmo trabalho sem duplicar nada.
+   - O processo sempre termina sozinho depois de rodar: `main()` do
+     script é síncrono, sem thread nem processo em segundo plano — ele
+     roda `gerar_para_mercados_ativos` uma vez, fecha a `Session` no
+     `finally` e encerra (com código 0 ou 1, conforme o resultado).
+   - Ao contrário do item 4 (RN03), **só `DATABASE_URL` é realmente
+     necessária** aqui — este script não usa `MERCADO_API_KEYS`,
+     `ADMIN_API_KEY` nem nenhuma variável do WhatsApp (não abre nenhum
+     endpoint HTTP, não autentica nada). É a mesma `DATABASE_URL`
+     herdada do plugin de Postgres já usado pelo serviço web — não um
+     banco separado.
+   - Geração duplicada do mesmo relatório no mesmo dia não é um risco:
+     `relatorio_acao_diaria_service.gerar_ou_obter` já é idempotente por
+     `(id_mercado, data_referencia)` — rodar o script várias vezes no
+     mesmo dia nunca cria um segundo relatório para o mesmo mercado.
+   - Mercado com `relatorio_diario_ativo=True` mas sem
+     `horario_relatorio_diario` configurado é ignorado nessa execução
+     (sem gerar, sem horário padrão, sem desativar o mercado) e aparece
+     listado no resumo impresso pelo script, para chamar atenção do
+     time operacional.
+   - Erro num mercado individual não impede os demais — é isolado,
+     aparece no resumo, e faz o script sair com código 1 ao final (para
+     o Railway registrar a execução como falha, ainda que os outros
+     mercados tenham sido processados normalmente).
+   - Uma falha geral (ex.: banco indisponível) propaga como exceção não
+     tratada — a sessão ainda é fechada corretamente antes disso, e a
+     próxima execução do cron (até 30 minutos depois) tenta de novo.
+   - Este serviço **nunca inicia o FastAPI/uvicorn** — o Start Command
+     sobrescrito substitui inteiramente o `startCommand` do
+     `railway.toml` só para este serviço específico; ele roda o script
+     avulso e termina, exatamente como já acontece com o serviço de cron
+     da RN03 (item 4 acima).
 
 ## Migrations — NUNCA automáticas no deploy
 
