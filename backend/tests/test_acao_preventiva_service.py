@@ -578,3 +578,117 @@ def test_query_c_filtra_por_id_mercado_via_join_duplo():
     esperado = RelatorioAcaoDiarioORM.id_mercado == ID_MERCADO
     assert any(c.compare(esperado) for c in clausulas)
     assert fake_c.travada_com_for_update is True
+
+
+# =============================================================================
+# preenchimento automático de data_inicio/data_fim
+# =============================================================================
+
+
+def test_atualizar_preenche_data_inicio_automaticamente_ao_mudar_para_em_andamento():
+    acao_orm = _acao(id_acao=1, id_item_relatorio=1, status="recomendada", data_inicio=None)
+    item_orm = _item(id_item=1, id_relatorio=ID_RELATORIO)
+    relatorio_orm = _relatorio()
+    db, fake_c, fake_d = _db_mock_atualizar(
+        acao_orm, item_orm=item_orm, relatorio_orm=relatorio_orm, total_concluidas=0
+    )
+    request = AcaoPreventivaEditRequest(status="em_andamento")
+
+    antes = datetime.now()
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_inicio is not None
+    assert abs((resultado.data_inicio - antes).total_seconds()) < 2
+
+
+def test_atualizar_nao_sobrescreve_data_inicio_ja_existente():
+    data_inicio_original = datetime(2026, 1, 1, 10, 0, 0)
+    acao_orm = _acao(
+        id_acao=1, id_item_relatorio=1, status="recomendada", data_inicio=data_inicio_original
+    )
+    item_orm = _item(id_item=1, id_relatorio=ID_RELATORIO)
+    relatorio_orm = _relatorio()
+    db, fake_c, fake_d = _db_mock_atualizar(
+        acao_orm, item_orm=item_orm, relatorio_orm=relatorio_orm, total_concluidas=0
+    )
+    request = AcaoPreventivaEditRequest(status="em_andamento")
+
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_inicio == data_inicio_original
+
+
+def test_atualizar_respeita_data_inicio_enviada_explicitamente():
+    data_inicio_explicita = datetime(2026, 3, 15, 8, 0, 0)
+    acao_orm = _acao(id_acao=1, id_item_relatorio=1, status="recomendada", data_inicio=None)
+    item_orm = _item(id_item=1, id_relatorio=ID_RELATORIO)
+    relatorio_orm = _relatorio()
+    db, fake_c, fake_d = _db_mock_atualizar(
+        acao_orm, item_orm=item_orm, relatorio_orm=relatorio_orm, total_concluidas=0
+    )
+    request = AcaoPreventivaEditRequest(status="em_andamento", data_inicio=data_inicio_explicita)
+
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_inicio == data_inicio_explicita
+
+
+def test_atualizar_preenche_data_fim_automaticamente_ao_mudar_para_concluida():
+    acao_orm = _acao(id_acao=1, id_item_relatorio=1, status="em_andamento", data_fim=None)
+    item_orm = _item(id_item=1, id_relatorio=ID_RELATORIO)
+    relatorio_orm = _relatorio()
+    db, fake_c, fake_d = _db_mock_atualizar(
+        acao_orm, item_orm=item_orm, relatorio_orm=relatorio_orm, total_concluidas=1
+    )
+    request = AcaoPreventivaEditRequest(status="concluida")
+
+    antes = datetime.now()
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_fim is not None
+    assert abs((resultado.data_fim - antes).total_seconds()) < 2
+
+
+def test_atualizar_nao_sobrescreve_data_fim_ja_existente():
+    data_fim_original = datetime(2026, 1, 2, 18, 0, 0)
+    acao_orm = _acao(
+        id_acao=1, id_item_relatorio=1, status="em_andamento", data_fim=data_fim_original
+    )
+    item_orm = _item(id_item=1, id_relatorio=ID_RELATORIO)
+    relatorio_orm = _relatorio()
+    db, fake_c, fake_d = _db_mock_atualizar(
+        acao_orm, item_orm=item_orm, relatorio_orm=relatorio_orm, total_concluidas=1
+    )
+    request = AcaoPreventivaEditRequest(status="concluida")
+
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_fim == data_fim_original
+
+
+def test_atualizar_respeita_data_fim_enviada_explicitamente():
+    data_fim_explicita = datetime(2026, 3, 20, 17, 30, 0)
+    acao_orm = _acao(id_acao=1, id_item_relatorio=1, status="em_andamento", data_fim=None)
+    item_orm = _item(id_item=1, id_relatorio=ID_RELATORIO)
+    relatorio_orm = _relatorio()
+    db, fake_c, fake_d = _db_mock_atualizar(
+        acao_orm, item_orm=item_orm, relatorio_orm=relatorio_orm, total_concluidas=1
+    )
+    request = AcaoPreventivaEditRequest(status="concluida", data_fim=data_fim_explicita)
+
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_fim == data_fim_explicita
+
+
+def test_atualizar_nao_preenche_datas_quando_status_nao_muda():
+    acao_orm = _acao(
+        id_acao=1, id_item_relatorio=1, status="em_andamento", data_inicio=None, data_fim=None
+    )
+    db, fake_c, fake_d = _db_mock_atualizar(acao_orm, com_recontagem=False)
+    request = AcaoPreventivaEditRequest(observacao="apenas uma nota")
+
+    resultado = service.atualizar(db, ID_MERCADO, acao_orm.id, request)
+
+    assert resultado.data_inicio is None
+    assert resultado.data_fim is None

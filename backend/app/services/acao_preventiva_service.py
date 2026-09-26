@@ -148,6 +148,17 @@ def atualizar(
         acao_orm.resultado_operacional = request.resultado_operacional
     if request.observacao is not None:
         acao_orm.observacao = request.observacao
+
+    # Preenchimento automático (regra aprovada): só quando ESTA requisição
+    # muda o status para em_andamento/concluida e o campo correspondente
+    # ainda está vazio — nunca sobrescreve um valor já existente
+    # (persistido antes, ou enviado explicitamente acima nesta mesma
+    # requisição, já aplicado nas linhas 143-146).
+    if request.status == STATUS_EM_ANDAMENTO and acao_orm.data_inicio is None:
+        acao_orm.data_inicio = datetime.now()
+    if request.status == STATUS_CONCLUIDA and acao_orm.data_fim is None:
+        acao_orm.data_fim = datetime.now()
+
     # Sem onupdate no banco (migration 0007 só define server_default=now()
     # na criação) — bump manual, mesma disciplina de
     # lote_service.editar_pendente com data_ultima_atualizacao.
